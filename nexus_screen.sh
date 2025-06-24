@@ -54,15 +54,7 @@ fi
 # 获取节点ID
 echo ""
 echo "请输入您的节点ID（纯数字，如：7366937）:"
-
-# 确保在交互式环境中运行
-if [ -t 0 ]; then
-    read -p "节点ID: " NODE_ID
-else
-    echo "❌ 错误：此脚本需要在交互式终端中运行"
-    echo "请直接运行: ./nexus_screen.sh"
-    exit 1
-fi
+read -p "节点ID: " NODE_ID
 
 # 清理输入（去除空格和特殊字符）
 NODE_ID=$(echo "$NODE_ID" | tr -d '[:space:]')

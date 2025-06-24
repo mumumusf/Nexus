@@ -22,13 +22,7 @@
 
 ## 🛠️ 快速开始
 
-### 一键运行（推荐）
-
-```bash
-curl -sSL https://raw.githubusercontent.com/mumumusf/Nexus/main/nexus_screen.sh | bash
-```
-
-### 手动下载运行
+### 下载并运行
 
 ```bash
 # 下载脚本
