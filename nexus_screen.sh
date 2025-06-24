@@ -53,12 +53,28 @@ fi
 
 # 获取节点ID
 echo ""
-read -p "请输入您的节点ID: " NODE_ID
+echo "请输入您的节点ID（纯数字，如：7366937）:"
+read -p "节点ID: " NODE_ID
 
+# 清理输入（去除空格和特殊字符）
+NODE_ID=$(echo "$NODE_ID" | tr -d '[:space:]')
+
+# 验证节点ID
 if [ -z "$NODE_ID" ]; then
-    echo "错误：请输入节点ID"
+    echo "❌ 错误：节点ID不能为空"
+    echo "请重新运行脚本并输入有效的节点ID"
     exit 1
 fi
+
+# 检查是否只包含数字
+if ! [[ "$NODE_ID" =~ ^[0-9]+$ ]]; then
+    echo "❌ 错误：节点ID应该只包含数字"
+    echo "您输入的ID: $NODE_ID"
+    echo "请重新运行脚本并输入正确的节点ID"
+    exit 1
+fi
+
+echo "✅ 节点ID验证通过: $NODE_ID"
 
 # 检查是否已有同名screen会话
 SESSION_NAME="nexus_${NODE_ID}"
