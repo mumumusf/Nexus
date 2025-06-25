@@ -46,7 +46,7 @@ fi
 # 安装nexus-cli（如果未安装）
 if ! command -v nexus-network &> /dev/null; then
     echo "正在安装 nexus-cli..."
-    curl https://cli.nexus.xyz/ | sh
+    curl -L https://cli.nexus.xyz | sh
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
     echo "安装完成！"
 fi
@@ -112,6 +112,10 @@ echo ''
 
 # 主循环
 while true; do
+    echo \"\$(date): 检查并安装最新版本的 nexus-cli...\"
+    curl -L https://cli.nexus.xyz | sh
+    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
+    
     echo \"\$(date): 启动节点 $NODE_ID\"
     nexus-network start --node-id \"$NODE_ID\"
     echo \"\$(date): 节点停止，2小时后重启...\"
