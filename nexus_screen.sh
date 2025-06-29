@@ -48,7 +48,7 @@ if ! command -v nexus-network &> /dev/null; then
     echo "正在安装 nexus-cli 及其依赖..."
     
     # 安装系统依赖
-    echo "安装系统依赖..."
+    echo "📦 安装系统依赖..."
     if command -v apt &> /dev/null; then
         sudo apt update
         sudo apt install -y protobuf-compiler curl
@@ -60,25 +60,34 @@ if ! command -v nexus-network &> /dev/null; then
         echo "错误：无法自动安装依赖，请手动安装 protobuf-compiler 和 curl"
         exit 1
     fi
+    echo "✅ 系统依赖安装完成"
     
     # 安装 Rust
-    echo "安装 Rust..."
+    echo "🦀 安装 Rust..."
     curl https://sh.rustup.rs -sSf | sh -s -- -y
     source $HOME/.cargo/env
+    echo "✅ Rust 安装完成"
     
     # 设置 Rust 默认版本
-    echo "设置 Rust 默认版本..."
+    echo "⚙️ 设置 Rust 默认版本..."
     rustup default stable
+    echo "✅ Rust 默认版本设置完成"
     
     # 安装 nexus-cli
-    echo "安装 nexus-cli..."
+    echo "📥 安装 nexus-cli..."
+    echo "注意：如果出现条款确认提示，请输入 'y' 确认"
     curl https://cli.nexus.xyz | sh
+    echo "✅ nexus-cli 安装完成"
     
     # 添加 PATH 环境变量
+    echo "🔧 配置环境变量..."
     echo 'export PATH="$HOME/.nexus/bin:$PATH"' >> ~/.bashrc
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
+    echo "✅ 环境变量配置完成"
     
-    echo "✅ nexus-cli 安装完成！"
+    echo "🎉 nexus-cli 及其依赖安装完成！"
+else
+    echo "✅ nexus-cli 已安装，跳过安装步骤"
 fi
 
 # 获取节点ID
@@ -144,8 +153,8 @@ echo ''
 while true; do
     echo \"\$(date): 检查并安装最新版本的 nexus-cli...\"
     
-    # 更新 nexus-cli
-    curl https://cli.nexus.xyz | sh
+    # 更新 nexus-cli（自动确认条款）
+    echo \"y\" | curl https://cli.nexus.xyz | sh
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
     
     echo \"\$(date): 启动节点 $NODE_ID\"
