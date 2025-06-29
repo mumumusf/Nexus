@@ -154,7 +154,7 @@ while true; do
     echo \"\$(date): 检查并安装最新版本的 nexus-cli...\"
     
     # 更新 nexus-cli（自动确认条款）
-    echo \"y\" | curl https://cli.nexus.xyz | sh
+    yes | curl https://cli.nexus.xyz | sh
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
     
     echo \"\$(date): 启动节点 $NODE_ID\"
