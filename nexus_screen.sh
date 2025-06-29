@@ -72,7 +72,7 @@ if ! command -v nexus-network &> /dev/null; then
     
     # 安装 nexus-cli
     echo "安装 nexus-cli..."
-    curl https://cli.nexus.xyz | sh
+    echo "y" | curl https://cli.nexus.xyz | sh
     
     # 添加 PATH 环境变量
     echo 'export PATH="$HOME/.nexus/bin:$PATH"' >> ~/.bashrc
@@ -145,7 +145,7 @@ while true; do
     echo \"\$(date): 检查并安装最新版本的 nexus-cli...\"
     
     # 更新 nexus-cli
-    curl https://cli.nexus.xyz | sh
+    echo "y" | curl https://cli.nexus.xyz | sh
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
     
     echo \"\$(date): 启动节点 $NODE_ID\"
