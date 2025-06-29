@@ -45,10 +45,40 @@ fi
 
 # 安装nexus-cli（如果未安装）
 if ! command -v nexus-network &> /dev/null; then
-    echo "正在安装 nexus-cli..."
-    curl -L https://cli.nexus.xyz | sh
+    echo "正在安装 nexus-cli 及其依赖..."
+    
+    # 安装系统依赖
+    echo "安装系统依赖..."
+    if command -v apt &> /dev/null; then
+        sudo apt update
+        sudo apt install -y protobuf-compiler curl
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y protobuf-compiler curl
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y protobuf-compiler curl
+    else
+        echo "错误：无法自动安装依赖，请手动安装 protobuf-compiler 和 curl"
+        exit 1
+    fi
+    
+    # 安装 Rust
+    echo "安装 Rust..."
+    curl https://sh.rustup.rs -sSf | sh -s -- -y
+    source $HOME/.cargo/env
+    
+    # 设置 Rust 默认版本
+    echo "设置 Rust 默认版本..."
+    rustup default stable
+    
+    # 安装 nexus-cli
+    echo "安装 nexus-cli..."
+    curl https://cli.nexus.xyz | sh
+    
+    # 添加 PATH 环境变量
+    echo 'export PATH="$HOME/.nexus/bin:$PATH"' >> ~/.bashrc
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
-    echo "安装完成！"
+    
+    echo "✅ nexus-cli 安装完成！"
 fi
 
 # 获取节点ID
@@ -113,13 +143,28 @@ echo ''
 # 主循环
 while true; do
     echo \"\$(date): 检查并安装最新版本的 nexus-cli...\"
-    curl -L https://cli.nexus.xyz | sh
+    
+    # 更新 nexus-cli
+    curl https://cli.nexus.xyz | sh
     source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
     
     echo \"\$(date): 启动节点 $NODE_ID\"
-    nexus-network start --node-id \"$NODE_ID\"
-    echo \"\$(date): 节点停止，2小时后重启...\"
+    
+    # 启动节点并在后台运行，同时设置2小时定时器
+    nexus-network start --node-id \"$NODE_ID\" &
+    NODE_PID=\$!
+    
+    # 等待2小时
+    echo \"\$(date): 节点已启动，将在2小时后重启...\"
     sleep 7200
+    
+    # 2小时后终止节点进程
+    echo \"\$(date): 2小时时间到，终止节点进程...\"
+    kill \$NODE_PID 2>/dev/null
+    wait \$NODE_PID 2>/dev/null
+    
+    echo \"\$(date): 节点已停止，准备重启...\"
+    sleep 5
 done
 "
 
