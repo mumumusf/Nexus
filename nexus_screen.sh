@@ -90,6 +90,19 @@ else
     echo "✅ nexus-cli 已安装，跳过安装步骤"
 fi
 
+# 询问用户是否要建立会话
+echo ""
+echo "=== 安装完成 ==="
+echo "nexus-cli 已准备就绪！"
+echo ""
+read -p "是否要建立 Screen 会话运行节点？(y/n): " create_session
+
+if [[ $create_session != "y" && $create_session != "Y" ]]; then
+    echo "好的，您可以稍后手动运行节点。"
+    echo "手动运行命令：nexus-network start --node-id <您的节点ID>"
+    exit 0
+fi
+
 # 获取节点ID
 echo ""
 echo "请输入您的节点ID（纯数字，如：7366937）:"
@@ -149,32 +162,8 @@ echo '会话名称: $SESSION_NAME'
 echo '开始时间: \$(date)'
 echo ''
 
-# 主循环
-while true; do
-    echo \"\$(date): 检查并安装最新版本的 nexus-cli...\"
-    
-    # 更新 nexus-cli（自动确认条款）
-    yes | curl https://cli.nexus.xyz | sh
-    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
-    
-    echo \"\$(date): 启动节点 $NODE_ID\"
-    
-    # 启动节点并在后台运行，同时设置2小时定时器
-    nexus-network start --node-id \"$NODE_ID\" &
-    NODE_PID=\$!
-    
-    # 等待2小时
-    echo \"\$(date): 节点已启动，将在2小时后重启...\"
-    sleep 7200
-    
-    # 2小时后终止节点进程
-    echo \"\$(date): 2小时时间到，终止节点进程...\"
-    kill \$NODE_PID 2>/dev/null
-    wait \$NODE_PID 2>/dev/null
-    
-    echo \"\$(date): 节点已停止，准备重启...\"
-    sleep 5
-done
+echo \"\$(date): 启动节点 $NODE_ID\"
+nexus-network start --node-id \"$NODE_ID\"
 "
 
 echo "✅ 节点已在Screen会话中启动！"
