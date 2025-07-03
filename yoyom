@@ -2,7 +2,64 @@
 
 # Nexus Network 一体化管理工具
 # 作者: @YOYOMYOYOA
-# 版本: v3.0.0
+# 版本: v4.0.0
+
+# 环境检测函数
+detect_environment() {
+    # 检测是否在WSL环境中
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        ENVIRONMENT="WSL"
+        echo "🔍 检测到 Windows WSL 环境"
+    elif [[ -f /proc/version ]]; then
+        ENVIRONMENT="LINUX"
+        echo "🔍 检测到 Linux 环境"
+    else
+        ENVIRONMENT="UNKNOWN"
+        echo "⚠️ 未知环境，将按Linux方式运行"
+    fi
+    
+    # 检测发行版
+    if command -v lsb_release >/dev/null 2>&1; then
+        DISTRO=$(lsb_release -si 2>/dev/null)
+    elif [[ -f /etc/os-release ]]; then
+        DISTRO=$(grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+    else
+        DISTRO="unknown"
+    fi
+    
+    echo "💻 环境信息: $ENVIRONMENT ($DISTRO)"
+    echo ""
+}
+
+# 根据环境调整命令
+get_package_manager() {
+    if command -v apt >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v yum >/dev/null 2>&1; then
+        echo "yum"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    else
+        echo "unknown"
+    fi
+}
+
+# 检查sudo权限
+check_sudo() {
+    if [[ $EUID -eq 0 ]]; then
+        SUDO_CMD=""
+        echo "✅ 当前为root用户"
+    elif sudo -n true 2>/dev/null; then
+        SUDO_CMD="sudo"
+        echo "✅ sudo权限可用"
+    else
+        echo "⚠️ 需要sudo权限来安装系统依赖"
+        echo "请确保当前用户有sudo权限，或以root用户运行"
+        SUDO_CMD="sudo"
+    fi
+}
 
 # 显示主要banner
 show_main_banner() {
@@ -15,6 +72,7 @@ show_main_banner() {
 ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝╚═╝  ╚═══╝
 
     === Nexus Network 一体化管理工具 ===
+    支持 Linux 和 Windows WSL 环境
 ** ====================================== **
 *         此脚本仅供免费使用              *
 *         禁止出售或用于盈利              *
@@ -38,12 +96,18 @@ detect_memory() {
     echo "🔍 正在检测系统内存..."
     
     # 获取总内存（单位：GB）
-    total_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    total_memory_gb=$((total_memory_kb / 1024 / 1024))
-    
-    # 获取可用内存（单位：GB）
-    available_memory_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-    available_memory_gb=$((available_memory_kb / 1024 / 1024))
+    if [[ -f /proc/meminfo ]]; then
+        total_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        total_memory_gb=$((total_memory_kb / 1024 / 1024))
+        
+        # 获取可用内存（单位：GB）
+        available_memory_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+        available_memory_gb=$((available_memory_kb / 1024 / 1024))
+    else
+        echo "❌ 无法读取内存信息，使用默认配置"
+        total_memory_gb=8
+        available_memory_gb=6
+    fi
     
     echo "💾 系统总内存: ${total_memory_gb}GB"
     echo "💿 可用内存: ${available_memory_gb}GB"
@@ -65,55 +129,116 @@ detect_memory() {
     return $recommended_nodes
 }
 
+# 安装系统依赖
+install_system_dependencies() {
+    echo "📦 安装系统依赖..."
+    
+    PKG_MANAGER=$(get_package_manager)
+    
+    case $PKG_MANAGER in
+        "apt")
+            echo "🔄 更新软件包列表..."
+            $SUDO_CMD apt update
+            echo "📥 安装依赖包..."
+            $SUDO_CMD apt install -y protobuf-compiler curl build-essential
+            ;;
+        "yum")
+            echo "📥 安装依赖包..."
+            $SUDO_CMD yum install -y protobuf-compiler curl gcc gcc-c++ make
+            ;;
+        "dnf")
+            echo "📥 安装依赖包..."
+            $SUDO_CMD dnf install -y protobuf-compiler curl gcc gcc-c++ make
+            ;;
+        "pacman")
+            echo "🔄 更新软件包列表..."
+            $SUDO_CMD pacman -Sy
+            echo "📥 安装依赖包..."
+            $SUDO_CMD pacman -S --noconfirm protobuf curl base-devel
+            ;;
+        *)
+            echo "❌ 未知的包管理器，请手动安装以下依赖："
+            echo "  - protobuf-compiler"
+            echo "  - curl"
+            echo "  - build-essential (或等效的编译工具)"
+            return 1
+            ;;
+    esac
+    
+    echo "✅ 系统依赖安装完成"
+    return 0
+}
+
+# 安装screen
+install_screen() {
+    if ! command -v screen &> /dev/null; then
+        echo "📺 正在安装 screen..."
+        
+        PKG_MANAGER=$(get_package_manager)
+        
+        case $PKG_MANAGER in
+            "apt")
+                $SUDO_CMD apt install -y screen
+                ;;
+            "yum")
+                $SUDO_CMD yum install -y screen
+                ;;
+            "dnf")
+                $SUDO_CMD dnf install -y screen
+                ;;
+            "pacman")
+                $SUDO_CMD pacman -S --noconfirm screen
+                ;;
+            *)
+                echo "❌ 无法自动安装screen，请手动安装"
+                return 1
+                ;;
+        esac
+        
+        echo "✅ screen 安装完成！"
+    else
+        echo "✅ screen 已安装"
+    fi
+    
+    return 0
+}
+
 # 安装节点功能
 install_nodes() {
     echo "
     === Nexus 自动化安装工具 (多开版) ===
 "
     
+    # 检测环境
+    detect_environment
+    
+    # 检查sudo权限
+    check_sudo
+    
     # 检测系统内存
     detect_memory
     recommended_nodes=$?
 
-    # 检查是否安装了screen
-    if ! command -v screen &> /dev/null; then
-        echo "正在安装 screen..."
-        if command -v apt &> /dev/null; then
-            sudo apt update && sudo apt install -y screen
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y screen
-        elif command -v dnf &> /dev/null; then
-            sudo dnf install -y screen
-        else
-            echo "错误：无法自动安装screen，请手动安装"
-            return 1
-        fi
-        echo "screen 安装完成！"
-    fi
-
-    # 安装nexus-cli（每次运行都重新安装）
-    echo "正在安装 nexus-cli 及其依赖..."
-
-    # 安装系统依赖
-    echo "📦 安装系统依赖..."
-    if command -v apt &> /dev/null; then
-        sudo apt update
-        sudo apt install -y protobuf-compiler curl
-    elif command -v yum &> /dev/null; then
-        sudo yum install -y protobuf-compiler curl
-    elif command -v dnf &> /dev/null; then
-        sudo dnf install -y protobuf-compiler curl
-    else
-        echo "错误：无法自动安装依赖，请手动安装 protobuf-compiler 和 curl"
+    # 安装screen
+    if ! install_screen; then
         return 1
     fi
-    echo "✅ 系统依赖安装完成"
+
+    # 安装系统依赖
+    if ! install_system_dependencies; then
+        return 1
+    fi
 
     # 安装 Rust
     echo "🦀 安装 Rust..."
-    curl https://sh.rustup.rs -sSf | sh -s -- -y
-    source $HOME/.cargo/env
-    echo "✅ Rust 安装完成"
+    if ! command -v rustc &> /dev/null; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
+        echo "✅ Rust 安装完成"
+    else
+        echo "✅ Rust 已安装"
+        source $HOME/.cargo/env 2>/dev/null || true
+    fi
 
     # 设置 Rust 默认版本
     echo "⚙️ 设置 Rust 默认版本..."
@@ -128,8 +253,24 @@ install_nodes() {
 
     # 添加 PATH 环境变量
     echo "🔧 配置环境变量..."
-    echo 'export PATH="$HOME/.nexus/bin:$PATH"' >> ~/.bashrc
-    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
+    
+    # 检测使用的shell
+    if [[ $SHELL == *"zsh"* ]]; then
+        SHELL_RC="$HOME/.zshrc"
+    else
+        SHELL_RC="$HOME/.bashrc"
+    fi
+    
+    # 检查是否已添加PATH
+    if ! grep -q ".nexus/bin" $SHELL_RC 2>/dev/null; then
+        echo 'export PATH="$HOME/.nexus/bin:$PATH"' >> $SHELL_RC
+        echo "✅ 已添加到 $SHELL_RC"
+    else
+        echo "✅ PATH 已配置"
+    fi
+    
+    source $SHELL_RC 2>/dev/null || source ~/.bashrc 2>/dev/null || true
+    export PATH="$HOME/.nexus/bin:$PATH"
     echo "✅ 环境变量配置完成"
 
     echo "🎉 nexus-cli 及其依赖安装完成！"
@@ -219,7 +360,7 @@ install_nodes() {
     conflicting_sessions=()
     for node_id in "${NODE_IDS[@]}"; do
         session_name="nexus_${node_id}"
-        if screen -list | grep -q "$session_name"; then
+        if screen -list 2>/dev/null | grep -q "$session_name"; then
             conflicting_sessions+=("$session_name")
         fi
     done
@@ -256,12 +397,14 @@ install_nodes() {
         
         # 在screen会话中运行节点
         screen -dmS "$session_name" bash -c "
+    export PATH=\"\$HOME/.nexus/bin:\$PATH\"
     echo '=== Nexus 节点运行中 ==='
     echo '节点ID: $node_id'
     echo '会话名称: $session_name'
     echo '节点序号: $((i+1))/${#NODE_IDS[@]}'
     echo '开始时间: \$(date)'
     echo '内存分配: 4GB (推荐)'
+    echo '环境: $ENVIRONMENT'
     echo ''
 
     echo \"\$(date): 启动节点 $node_id\"
@@ -292,14 +435,14 @@ install_nodes() {
     cat > stop_all_nodes.sh << 'EOF'
 #!/bin/bash
 echo "🛑 停止所有 Nexus 节点..."
-for session in $(screen -list | grep nexus_ | awk '{print $1}'); do
+for session in $(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}'); do
     echo "停止会话: $session"
     screen -S "$session" -X quit 2>/dev/null
 done
 echo "✅ 所有节点已停止"
 EOF
 
-    chmod +x stop_all_nodes.sh
+    chmod +x stop_all_nodes.sh 2>/dev/null || true
 
     echo "📊 当前运行的节点:"
     for node_id in "${NODE_IDS[@]}"; do
@@ -319,7 +462,7 @@ check_nodes_status() {
     echo "📊 检查节点状态..."
     echo ""
     
-    nexus_sessions=$(screen -list | grep nexus_ | awk '{print $1}')
+    nexus_sessions=$(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}')
     
     if [ -z "$nexus_sessions" ]; then
         echo "❌ 没有发现运行中的 Nexus 节点"
@@ -353,7 +496,7 @@ stop_node() {
     
     session_name="nexus_${node_id}"
     
-    if screen -list | grep -q "$session_name"; then
+    if screen -list 2>/dev/null | grep -q "$session_name"; then
         echo "🛑 停止节点 $node_id..."
         screen -S "$session_name" -X quit 2>/dev/null
         echo "✅ 节点 $node_id 已停止"
@@ -366,7 +509,7 @@ stop_node() {
 stop_all_nodes() {
     echo "🛑 停止所有 Nexus 节点..."
     
-    nexus_sessions=$(screen -list | grep nexus_ | awk '{print $1}')
+    nexus_sessions=$(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}')
     
     if [ -z "$nexus_sessions" ]; then
         echo "❌ 没有发现运行中的 Nexus 节点"
@@ -386,7 +529,7 @@ stop_all_nodes() {
 connect_to_node() {
     check_nodes_status
     
-    if [ "$(screen -list | grep nexus_ | wc -l)" -eq 0 ]; then
+    if [ "$(screen -list 2>/dev/null | grep nexus_ | wc -l)" -eq 0 ]; then
         return
     fi
     
@@ -399,7 +542,7 @@ connect_to_node() {
     
     session_name="nexus_${node_id}"
     
-    if screen -list | grep -q "$session_name"; then
+    if screen -list 2>/dev/null | grep -q "$session_name"; then
         echo "🔗 连接到节点 $node_id..."
         echo "提示: 按 Ctrl+A 然后 D 分离会话"
         screen -r "$session_name"
@@ -413,35 +556,50 @@ show_system_resources() {
     echo "💻 系统资源使用情况:"
     echo ""
     
+    # 检测环境
+    detect_environment
+    
     # 内存使用情况
-    total_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    available_memory_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-    used_memory_kb=$((total_memory_kb - available_memory_kb))
-    
-    total_memory_gb=$((total_memory_kb / 1024 / 1024))
-    used_memory_gb=$((used_memory_kb / 1024 / 1024))
-    available_memory_gb=$((available_memory_kb / 1024 / 1024))
-    
-    memory_usage_percent=$((used_memory_gb * 100 / total_memory_gb))
-    
-    echo "📊 内存使用:"
-    echo "  总内存: ${total_memory_gb}GB"
-    echo "  已使用: ${used_memory_gb}GB (${memory_usage_percent}%)"
-    echo "  可用内存: ${available_memory_gb}GB"
+    if [[ -f /proc/meminfo ]]; then
+        total_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        available_memory_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+        used_memory_kb=$((total_memory_kb - available_memory_kb))
+        
+        total_memory_gb=$((total_memory_kb / 1024 / 1024))
+        used_memory_gb=$((used_memory_kb / 1024 / 1024))
+        available_memory_gb=$((available_memory_kb / 1024 / 1024))
+        
+        memory_usage_percent=$((used_memory_gb * 100 / total_memory_gb))
+        
+        echo "📊 内存使用:"
+        echo "  总内存: ${total_memory_gb}GB"
+        echo "  已使用: ${used_memory_gb}GB (${memory_usage_percent}%)"
+        echo "  可用内存: ${available_memory_gb}GB"
+    else
+        echo "❌ 无法读取内存信息"
+    fi
     echo ""
     
     # CPU使用情况
-    cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | sed 's/%us,//')
-    echo "🖥️ CPU使用率: ${cpu_usage}%"
+    if command -v top >/dev/null 2>&1; then
+        cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | sed 's/%us,//' 2>/dev/null || echo "N/A")
+        echo "🖥️ CPU使用率: ${cpu_usage}%"
+    else
+        echo "🖥️ CPU使用率: 无法获取"
+    fi
     echo ""
     
     # 磁盘使用情况
     echo "💾 磁盘使用:"
-    df -h / | tail -1 | awk '{print "  根目录: " $3 "/" $2 " (" $5 " 已使用)"}'
+    if command -v df >/dev/null 2>&1; then
+        df -h / 2>/dev/null | tail -1 | awk '{print "  根目录: " $3 "/" $2 " (" $5 " 已使用)")' || echo "  无法获取磁盘信息"
+    else
+        echo "  无法获取磁盘信息"
+    fi
     echo ""
     
     # 运行中的节点数量
-    nexus_count=$(screen -list | grep nexus_ | wc -l)
+    nexus_count=$(screen -list 2>/dev/null | grep nexus_ | wc -l)
     echo "🚀 运行中的节点: ${nexus_count} 个"
     
     if [ $nexus_count -gt 0 ]; then
@@ -537,12 +695,17 @@ show_help() {
     echo "
 📖 === Nexus Network 一体化管理工具帮助 ===
 
+🌐 支持环境:
+  • Linux (Ubuntu/CentOS/Debian/Arch Linux)
+  • Windows WSL (Windows Subsystem for Linux)
+
 🚀 主要功能:
   1. 自动检测系统内存并推荐节点数量
   2. 一键安装 nexus-cli 和相关依赖
   3. 支持多个节点同时运行
   4. 完整的节点管理功能
   5. 实时系统资源监控
+  6. 智能环境检测和适配
 
 📋 使用流程:
   1. 首次使用选择 '安装并启动 Nexus 节点'
@@ -550,11 +713,12 @@ show_help() {
   3. 后续使用选择 '管理现有节点' 进行管理
 
 🔧 常用命令:
+  • 启动工具: bash yoyom
   • 查看所有会话: screen -list
   • 连接到节点: screen -r nexus_<节点ID>
   • 分离会话: Ctrl+A 然后 D
   • 停止单个节点: screen -S nexus_<节点ID> -X quit
-  • 停止所有节点: ./stop_all_nodes.sh
+  • 停止所有节点: bash stop_all_nodes.sh
 
 💾 内存要求:
   • 每个节点需要 4GB 内存
@@ -568,6 +732,12 @@ show_help() {
   • 节点ID 必须是纯数字
   • 不要超过系统推荐的节点数量
   • SSH 断开后节点会继续运行
+  • WSL用户请确保已安装Linux发行版
+
+🔧 WSL环境说明:
+  • 在Windows上需要先安装WSL
+  • 推荐使用Ubuntu或Debian发行版
+  • 确保WSL版本为WSL2
 "
 }
 
