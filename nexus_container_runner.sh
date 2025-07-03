@@ -151,81 +151,144 @@ create_nexus_script() {
     cat > nexus_install.sh << 'EOF'
 #!/bin/bash
 
-set -e
+# 启用详细日志和错误处理
+set -x  # 显示执行的每条命令
+set -e  # 遇到错误立即退出
 
 echo "===================="
 echo "开始安装Nexus CLI..."
 echo "节点ID: ${NODE_ID:-6520503}"
+echo "时间: $(date)"
+echo "系统信息: $(uname -a)"
 echo "===================="
 
-# 安装必要的依赖
-echo "更新系统包..."
-apt-get update > /dev/null 2>&1
+# 检查基本环境
+echo "### 环境检查 ###"
+echo "当前用户: $(whoami)"
+echo "当前目录: $(pwd)"
+echo "可用磁盘空间:"
+df -h
+echo "内存信息:"
+free -h
+echo "网络连通性测试:"
+ping -c 2 8.8.8.8 || echo "⚠ 网络连接可能有问题"
 
-echo "安装依赖包..."
-apt-get install -y curl wget ca-certificates > /dev/null 2>&1
+# 安装必要的依赖
+echo "### 开始安装依赖 ###"
+echo "更新软件包列表..."
+apt-get update -v
+
+echo "安装必要的依赖包..."
+apt-get install -y curl wget ca-certificates build-essential -v
+
+echo "验证依赖安装..."
+curl --version || echo "✗ curl安装失败"
+wget --version || echo "✗ wget安装失败"
 
 # 下载并安装Nexus CLI
-echo "下载Nexus CLI..."
-curl -L https://cli.nexus.xyz | sh
+echo "### 下载Nexus CLI ###"
+echo "开始下载Nexus CLI (时间: $(date))..."
+echo "下载URL: https://cli.nexus.xyz"
 
-echo "Nexus CLI安装完成"
+# 显示下载过程
+curl -L -v https://cli.nexus.xyz | sh
+
+echo "Nexus CLI下载安装完成 (时间: $(date))"
 
 # 验证GLIBC版本
+echo "### GLIBC版本检查 ###"
 echo "检查GLIBC版本..."
+ldd --version
 GLIBC_VERSION=$(ldd --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' || echo "unknown")
-echo "当前GLIBC版本: $GLIBC_VERSION"
+echo "提取的GLIBC版本: $GLIBC_VERSION"
 
 # 检查是否支持GLIBC 2.39
 if [ "$GLIBC_VERSION" != "unknown" ]; then
-    # 使用awk比较版本号
     GLIBC_MAJOR=$(echo $GLIBC_VERSION | cut -d. -f1)
     GLIBC_MINOR=$(echo $GLIBC_VERSION | cut -d. -f2)
+    echo "GLIBC主版本: $GLIBC_MAJOR, 次版本: $GLIBC_MINOR"
     
     if [ "$GLIBC_MAJOR" -gt 2 ] || [ "$GLIBC_MAJOR" -eq 2 -a "$GLIBC_MINOR" -ge 39 ]; then
-        echo "✓ GLIBC版本满足要求 (需要 ≥ 2.39)"
+        echo "✓ GLIBC版本满足要求 (当前: $GLIBC_VERSION, 需要: ≥ 2.39)"
     else
         echo "✗ GLIBC版本不满足要求 (当前: $GLIBC_VERSION, 需要: ≥ 2.39)"
-        echo "建议使用更新的Ubuntu版本"
+        echo "警告: 可能影响Nexus运行"
     fi
 else
     echo "⚠ 无法检测GLIBC版本"
 fi
 
-# 验证安装
+# 验证Nexus CLI安装
+echo "### 验证Nexus CLI安装 ###"
+echo "检查Nexus安装目录..."
+ls -la ~/
+echo "检查.nexus目录..."
+ls -la ~/.nexus/ || echo "✗ .nexus目录不存在"
+echo "检查nexus-network二进制文件..."
+ls -la ~/.nexus/bin/ || echo "✗ bin目录不存在"
+
 if [ -f ~/.nexus/bin/nexus-network ]; then
-    echo "✓ Nexus CLI安装成功"
+    echo "✓ Nexus CLI二进制文件存在"
+    echo "文件信息:"
+    ls -la ~/.nexus/bin/nexus-network
+    echo "文件类型:"
+    file ~/.nexus/bin/nexus-network
+    echo "测试执行权限:"
+    ~/.nexus/bin/nexus-network --help || echo "⚠ 执行测试失败"
 else
-    echo "✗ Nexus CLI安装失败"
+    echo "✗ Nexus CLI安装失败: 二进制文件不存在"
+    echo "尝试查找可能的安装位置..."
+    find / -name "nexus-network" 2>/dev/null || echo "未找到nexus-network文件"
     exit 1
 fi
 
 echo "===================="
 echo "启动Nexus网络节点..."
 echo "节点ID: ${NODE_ID:-6520503}"
+echo "时间: $(date)"
 echo "===================="
-
-# 自动启动节点
-echo "正在启动节点，这可能需要几分钟..."
 
 # 设置非交互模式
 export DEBIAN_FRONTEND=noninteractive
 
-# 启动节点，自动确认所有提示
-~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503} <<< "y" || {
-    echo "首次启动失败，尝试重新启动..."
+# 显示启动前的环境
+echo "启动前环境检查:"
+echo "HOME目录: $HOME"
+echo "PATH: $PATH"
+echo "当前进程:"
+ps aux
+
+# 启动节点
+echo "### 启动Nexus节点 ###"
+echo "执行命令: ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503}"
+echo "开始时间: $(date)"
+
+# 尝试启动节点
+if ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503} <<< "y"; then
+    echo "✓ 节点启动成功"
+else
+    echo "⚠ 首次启动失败，尝试重新启动..."
     sleep 5
-    ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503} <<< "y"
-}
+    echo "重试时间: $(date)"
+    ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503} <<< "y" || {
+        echo "✗ 节点启动失败"
+        echo "尝试查看错误日志..."
+        find ~/.nexus -name "*.log" -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+        exit 1
+    }
+fi
 
 echo "===================="
 echo "Nexus节点启动完成!"
 echo "节点ID: ${NODE_ID:-6520503}"
+echo "完成时间: $(date)"
 echo "===================="
 
 # 显示节点状态
-echo "节点状态检查..."
+echo "### 节点状态检查 ###"
 sleep 5
+echo "检查进程状态:"
+ps aux | grep nexus || echo "未找到nexus进程"
 
 # 保持容器运行
 echo "节点正在运行中..."
@@ -234,6 +297,8 @@ echo "使用 'docker logs <容器名>' 查看详细日志"
 # 循环输出节点状态
 while true; do
     echo "$(date): 节点 ${NODE_ID:-6520503} 正在运行..."
+    echo "当前进程数: $(ps aux | wc -l)"
+    echo "内存使用: $(free -h | grep Mem:)"
     sleep 300  # 每5分钟输出一次状态
 done
 EOF
