@@ -256,6 +256,9 @@ run_single_container() {
         docker rm -f $container_name > /dev/null 2>&1
     fi
     
+    # 确保脚本有执行权限
+    chmod +x nexus_install.sh 2>/dev/null || true
+    
     # 运行容器 (使用Ubuntu 24.04以支持GLIBC 2.39)
     docker run -d \
         --name "$container_name" \
@@ -265,7 +268,6 @@ run_single_container() {
         ubuntu:24.04 \
         /bin/bash -c "
             cd /app && 
-            chmod +x nexus_install.sh && 
             ./nexus_install.sh
         "
     

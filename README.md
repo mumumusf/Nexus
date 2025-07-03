@@ -34,49 +34,11 @@ chmod +x nexus_container_runner.sh
 
 ## 系统要求
 
-- Linux系统（Ubuntu/CentOS）或macOS
+- Linux VPS服务器（Ubuntu/CentOS推荐）
 - 至少1GB可用内存
 - 至少1个CPU核心
 - 网络连接
 - **自动确保GLIBC 2.39支持**（脚本使用Ubuntu 24.04镜像）
-
-## Windows用户注意
-
-Windows用户可以通过以下方式运行此脚本：
-
-### 方法一：使用Windows启动器脚本（推荐）
-```powershell
-# 首先克隆项目
-git clone https://github.com/mumumusf/Nexus.git
-cd Nexus
-
-# 运行Windows启动器
-.\run_nexus_windows.ps1
-```
-
-该启动器会自动检测您的环境并选择最佳运行方式。
-
-### 方法二：手动选择环境
-1. **WSL (Windows Subsystem for Linux)** - 推荐
-2. **Git Bash**
-3. **Docker Desktop + PowerShell**
-
-### WSL安装方法
-```powershell
-# 以管理员身份运行PowerShell
-wsl --install
-# 重启计算机后，设置Ubuntu用户名和密码
-```
-
-### Git Bash使用方法
-1. 下载并安装 Git for Windows: https://git-scm.com/download/win
-2. 右键点击文件夹，选择"Git Bash Here"
-3. 克隆项目：
-   ```bash
-   git clone https://github.com/mumumusf/Nexus.git
-   cd Nexus
-   ```
-4. 运行脚本：`./nexus_container_runner.sh`
 
 ## 使用方法
 
