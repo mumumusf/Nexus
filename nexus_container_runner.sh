@@ -182,10 +182,10 @@ fi
 
 echo "安装必要的依赖包..."
 export DEBIAN_FRONTEND=noninteractive
-if ! apt-get install -y curl wget ca-certificates build-essential; then
+if ! apt-get install -y curl wget ca-certificates build-essential iproute2 iputils-ping net-tools; then
     echo "⚠ 首次安装失败，尝试修复并重新安装..."
     apt-get --fix-broken install -y
-    apt-get install -y curl wget ca-certificates build-essential
+    apt-get install -y curl wget ca-certificates build-essential iproute2 iputils-ping net-tools
 fi
 
 echo "验证依赖安装..."
@@ -213,7 +213,8 @@ if ! command -v curl > /dev/null 2>&1; then
 fi
 
 echo "开始下载Nexus CLI (时间: $(date))..."
-echo "下载URL: https://cli.nexus.xyz"
+echo "下载URL: https://cli.nexus.xyz/"
+echo "使用官方安装脚本..."
 
 # 设置下载超时和重试
 MAX_RETRIES=3
@@ -222,7 +223,7 @@ RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "尝试下载 (第 $((RETRY_COUNT + 1)) 次)..."
     
-    if curl -L --connect-timeout 30 --max-time 300 https://cli.nexus.xyz | sh; then
+    if curl --connect-timeout 30 --max-time 300 https://cli.nexus.xyz/ | sh; then
         echo "✓ Nexus CLI下载安装完成 (时间: $(date))"
         break
     else
@@ -237,6 +238,21 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         fi
     fi
 done
+
+# 刷新环境变量 (按照官方文档)
+echo "刷新环境变量..."
+if [ -f ~/.bashrc ]; then
+    source ~/.bashrc
+    echo "✓ 已刷新 ~/.bashrc"
+fi
+if [ -f ~/.zshrc ]; then
+    source ~/.zshrc  
+    echo "✓ 已刷新 ~/.zshrc"
+fi
+
+# 更新PATH以确保能找到nexus-network
+export PATH="$HOME/.nexus/bin:$PATH"
+echo "✓ 已更新PATH: $PATH"
 
 # 验证GLIBC版本
 echo "### GLIBC版本检查 ###"
@@ -273,43 +289,52 @@ echo "检查HOME目录: $HOME"
 echo "检查家目录内容..."
 ls -la $HOME/
 
-# 检查可能的安装位置
-NEXUS_PATHS=(
-    "$HOME/.nexus"
-    "/root/.nexus"
-    "/usr/local/bin"
-    "/usr/bin"
-)
-
-NEXUS_BINARY=""
-NEXUS_DIR=""
-
-echo "查找Nexus安装位置..."
-for path in "${NEXUS_PATHS[@]}"; do
-    echo "检查: $path"
-    if [ -d "$path" ] && [ -f "$path/bin/nexus-network" ]; then
-        NEXUS_DIR="$path"
-        NEXUS_BINARY="$path/bin/nexus-network"
-        echo "✓ 找到Nexus目录: $NEXUS_DIR"
-        break
-    elif [ -f "$path/nexus-network" ]; then
-        NEXUS_BINARY="$path/nexus-network"
-        echo "✓ 找到Nexus二进制文件: $NEXUS_BINARY"
-        break
-    fi
-done
-
-if [ -n "$NEXUS_BINARY" ] && [ -f "$NEXUS_BINARY" ]; then
-    echo "✓ Nexus CLI二进制文件存在: $NEXUS_BINARY"
-    echo "文件信息:"
-    ls -la "$NEXUS_BINARY"
-    echo "文件类型:"
-    file "$NEXUS_BINARY"
-    echo "测试执行权限:"
-    chmod +x "$NEXUS_BINARY"
-    "$NEXUS_BINARY" --help 2>&1 | head -n 5 || echo "⚠ 执行测试失败"
+# 验证nexus-network命令是否可用
+echo "验证nexus-network命令..."
+if command -v nexus-network > /dev/null 2>&1; then
+    echo "✓ nexus-network在PATH中可用"
+    NEXUS_BINARY="nexus-network"
+    NEXUS_DIR=""
 else
-    echo "✗ Nexus CLI安装失败: 二进制文件不存在"
+    echo "⚠ nexus-network不在PATH中，查找安装位置..."
+    
+    # 检查可能的安装位置
+    NEXUS_PATHS=(
+        "$HOME/.nexus"
+        "/root/.nexus"
+        "/usr/local/bin"
+        "/usr/bin"
+    )
+
+    NEXUS_BINARY=""
+    NEXUS_DIR=""
+
+    for path in "${NEXUS_PATHS[@]}"; do
+        echo "检查: $path"
+        if [ -d "$path" ] && [ -f "$path/bin/nexus-network" ]; then
+            NEXUS_DIR="$path"
+            NEXUS_BINARY="$path/bin/nexus-network"
+            echo "✓ 找到Nexus目录: $NEXUS_DIR"
+            break
+        elif [ -f "$path/nexus-network" ]; then
+            NEXUS_BINARY="$path/nexus-network"
+            echo "✓ 找到Nexus二进制文件: $NEXUS_BINARY"
+            break
+        fi
+    done
+fi
+
+if [ -n "$NEXUS_BINARY" ] && ( command -v "$NEXUS_BINARY" > /dev/null 2>&1 || [ -f "$NEXUS_BINARY" ] ); then
+    echo "✓ Nexus CLI可用: $NEXUS_BINARY"
+    echo "测试nexus-network命令:"
+    if command -v "$NEXUS_BINARY" > /dev/null 2>&1; then
+        $NEXUS_BINARY --help 2>&1 | head -n 5 || echo "⚠ 执行测试失败"
+    else
+        chmod +x "$NEXUS_BINARY"
+        "$NEXUS_BINARY" --help 2>&1 | head -n 5 || echo "⚠ 执行测试失败"
+    fi
+else
+    echo "✗ Nexus CLI安装失败: 命令不可用"
     echo "尝试全局搜索..."
     find / -name "nexus-network" -type f 2>/dev/null | head -5 || echo "未找到nexus-network文件"
     exit 1
@@ -331,30 +356,100 @@ echo "PATH: $PATH"
 echo "当前进程:"
 ps aux
 
-# 启动节点
+# 网络环境检查
+echo "### 网络环境检查 ###"
+echo "网络接口信息:"
+ip addr show || ifconfig -a || echo "⚠ 无法获取网络接口信息"
+echo "路由表信息:"
+ip route show || route -n || echo "⚠ 无法获取路由信息"
+echo "DNS配置:"
+cat /etc/resolv.conf || echo "⚠ 无法读取DNS配置"
+echo "测试外网连通性:"
+ping -c 2 8.8.8.8 || echo "⚠ 外网连接可能有问题"
+
+# 启动节点 (按照官方文档)
 echo "### 启动Nexus节点 ###"
-echo "使用二进制文件: $NEXUS_BINARY"
-echo "执行命令: $NEXUS_BINARY start --node-id ${NODE_ID:-6520503}"
+echo "使用命令: $NEXUS_BINARY"
+echo "执行命令: nexus-network start --node-id ${NODE_ID:-6520503}"
 echo "开始时间: $(date)"
 
-# 尝试启动节点
-if "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y"; then
-    echo "✓ 节点启动成功"
+# 按照官方文档启动节点
+echo "尝试方式1: 使用官方命令格式启动..."
+if command -v nexus-network > /dev/null 2>&1; then
+    # 使用全局命令
+    if timeout 60 nexus-network start --node-id ${NODE_ID:-6520503} <<< "y"; then
+        echo "✓ 节点启动成功"
+    else
+        echo "⚠ 全局命令启动失败，尝试完整路径..."
+        if timeout 60 "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y"; then
+            echo "✓ 节点启动成功"
+        else
+            echo "⚠ 标准启动失败，尝试诊断模式..."
+            start_diagnostics
+        fi
+    fi
 else
-    echo "⚠ 首次启动失败，尝试重新启动..."
+    # 使用完整路径
+    if timeout 60 "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y"; then
+        echo "✓ 节点启动成功"
+    else
+        echo "⚠ 启动失败，尝试诊断模式..."
+        start_diagnostics
+    fi
+fi
+
+# 诊断函数
+start_diagnostics() {
+    echo "### 诊断模式 ###"
+    
+    # 显示更多诊断信息
+    echo "检查二进制文件权限和依赖:"
+    if [ -f "$NEXUS_BINARY" ]; then
+        ls -la "$NEXUS_BINARY"
+        file "$NEXUS_BINARY"
+        ldd "$NEXUS_BINARY" || echo "⚠ 无法检查动态库依赖"
+    fi
+    
+    echo "系统信息诊断:"
+    echo "内核版本: $(uname -r)"
+    echo "系统限制:"
+    ulimit -a
+    
+    # 尝试不同的启动方式
+    echo "尝试方式2: 后台启动..."
     sleep 5
     echo "重试时间: $(date)"
-    "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y" || {
-        echo "✗ 节点启动失败"
-        echo "尝试查看错误日志..."
-        if [ -n "$NEXUS_DIR" ]; then
-            find "$NEXUS_DIR" -name "*.log" -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+    
+    if "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y" &
+    then
+        NEXUS_PID=$!
+        echo "节点进程ID: $NEXUS_PID"
+        sleep 15
+        
+        if kill -0 "$NEXUS_PID" 2>/dev/null; then
+            echo "✓ 节点在后台运行中"
+            wait "$NEXUS_PID"
         else
-            find /root -name "*.log" -path "*nexus*" -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+            echo "⚠ 节点进程已退出"
+            show_logs_and_exit
         fi
-        exit 1
-    }
-fi
+    else
+        echo "✗ 所有启动方式都失败"
+        show_logs_and_exit
+    fi
+}
+
+# 显示日志并退出
+show_logs_and_exit() {
+    echo "尝试查看错误日志..."
+    if [ -n "$NEXUS_DIR" ]; then
+        find "$NEXUS_DIR" -name "*.log" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+    else
+        find /root -name "*.log" -path "*nexus*" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+        find /home -name "*.log" -path "*nexus*" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || true
+    fi
+    exit 1
+}
 
 echo "===================="
 echo "Nexus节点启动完成!"
@@ -403,10 +498,22 @@ run_single_container() {
     chmod +x nexus_install.sh 2>/dev/null || true
     
     # 运行容器 (使用Ubuntu 24.04以支持GLIBC 2.39)
+    # 添加最大权限和设备映射以支持Nexus网络功能
     docker run -d \
         --name "$container_name" \
         --env NODE_ID="$node_id" \
         --env DEBIAN_FRONTEND=noninteractive \
+        --network host \
+        --privileged \
+        --cap-add=ALL \
+        --security-opt seccomp=unconfined \
+        --security-opt apparmor=unconfined \
+        --device=/dev/net/tun \
+        --device=/dev/urandom \
+        --device=/dev/random \
+        -v /dev:/dev \
+        -v /proc:/proc \
+        -v /sys:/sys \
         -v "$(pwd)/nexus_install.sh:/app/nexus_install.sh:ro" \
         ubuntu:24.04 \
         /bin/bash -c "
@@ -527,15 +634,119 @@ interactive_log_management() {
     done
 }
 
+# 本地安装Nexus (不使用容器)
+install_nexus_locally() {
+    log_step "在本地安装Nexus CLI..."
+    
+    if [[ "$OS" != "linux" ]]; then
+        log_error "本地安装仅支持Linux系统"
+        return 1
+    fi
+    
+    # 安装依赖
+    case $DISTRO in
+        "ubuntu")
+            if command -v sudo > /dev/null; then
+                sudo apt-get update
+                sudo apt-get install -y curl wget ca-certificates
+            else
+                apt-get update  
+                apt-get install -y curl wget ca-certificates
+            fi
+            ;;
+        "centos")
+            if command -v sudo > /dev/null; then
+                sudo yum install -y curl wget ca-certificates
+            else
+                yum install -y curl wget ca-certificates
+            fi
+            ;;
+    esac
+    
+    # 下载并安装Nexus CLI
+    log_info "下载Nexus CLI..."
+    if curl https://cli.nexus.xyz/ | sh; then
+        log_info "✓ Nexus CLI安装成功"
+    else
+        log_error "Nexus CLI安装失败"
+        return 1
+    fi
+    
+    # 刷新环境
+    if [ -f ~/.bashrc ]; then
+        source ~/.bashrc
+    fi
+    export PATH="$HOME/.nexus/bin:$PATH"
+    
+    # 验证安装
+    if command -v nexus-network > /dev/null 2>&1; then
+        log_info "✓ Nexus CLI命令可用"
+        
+        # 询问节点ID并启动
+        echo
+        read -p "请输入节点ID (默认: 6520503): " node_id
+        node_id=${node_id:-6520503}
+        
+        log_step "启动Nexus节点 (节点ID: $node_id)..."
+        log_info "开始时间: $(date)"
+        
+        # 启动节点
+        echo "按回车确认启动..."
+        nexus-network start --node-id "$node_id"
+        
+    elif [ -f "$HOME/.nexus/bin/nexus-network" ]; then
+        log_info "✓ Nexus CLI二进制文件已安装"
+        
+        # 询问节点ID并启动
+        echo
+        read -p "请输入节点ID (默认: 6520503): " node_id
+        node_id=${node_id:-6520503}
+        
+        log_step "启动Nexus节点 (节点ID: $node_id)..."
+        log_info "开始时间: $(date)"
+        
+        # 启动节点
+        echo "按回车确认启动..."
+        "$HOME/.nexus/bin/nexus-network" start --node-id "$node_id"
+    else
+        log_error "Nexus CLI安装失败，未找到可执行文件"
+        return 1
+    fi
+}
+
 # 主函数
 main() {
-    log_info "=== Nexus 容器运行脚本启动 ==="
+    log_info "=== Nexus 运行脚本启动 ==="
     
     check_root
     detect_os
-    install_docker
-    detect_system_resources
-    create_nexus_script
+    
+    echo
+    log_step "请选择安装方式："
+    echo "1. 容器模式 (推荐用于多节点)"
+    echo "2. 本地安装 (推荐用于解决网络问题)"
+    echo
+    read -p "请选择 (1/2): " install_mode
+    
+    case $install_mode in
+        1)
+            log_info "选择容器模式..."
+            install_docker
+            detect_system_resources
+            create_nexus_script
+            ;;
+        2)
+            log_info "选择本地安装模式..."
+            install_nexus_locally
+            return 0
+            ;;
+        *)
+            log_warn "无效选择，默认使用容器模式..."
+            install_docker
+            detect_system_resources
+            create_nexus_script
+            ;;
+    esac
     
     echo
     log_step "请输入要运行的容器数量 (建议: $SUGGESTED_CONTAINERS, 最大: 10): "
