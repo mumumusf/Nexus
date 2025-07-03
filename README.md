@@ -21,6 +21,8 @@
 ### 最低要求
 - **Node.js**: 12.0或更高版本
 - **npm**: 6.0或更高版本
+- **Screen**: 终端复用器（Linux/macOS自带，Windows需WSL）
+- **Nexus CLI**: 自动安装或手动安装
 - **内存**: 至少2GB RAM
 - **CPU**: 至少1核心
 - **存储**: 至少1GB可用空间
@@ -32,6 +34,7 @@
 - **内存**: 4GB+ RAM
 - **CPU**: 2核心+
 - **存储**: 5GB+ 可用空间
+- **操作系统**: Linux/macOS/WSL（Windows Subsystem for Linux）
 
 ## 安装指南
 
@@ -46,19 +49,7 @@ cd Nexus
 
 ### 3. 运行脚本
 
-#### Windows用户
-双击运行 `run.bat` 或在命令行中执行：
-```cmd
-run.bat
-```
-
-#### Linux/macOS用户
-```bash
-chmod +x run.sh
-./run.sh
-```
-
-#### 使用npm运行
+#### 使用npm运行（推荐）
 ```bash
 npm install
 npm start
@@ -69,14 +60,11 @@ npm start
 node nexus_node_manager.js
 ```
 
-### 4. 环境测试
-运行环境测试脚本检查所有依赖：
+#### Windows用户（WSL推荐）
+在WSL环境中运行：
 ```bash
-node test_environment.js
-```
-或
-```bash
-npm test
+npm install
+npm start
 ```
 
 ## 使用说明
@@ -135,9 +123,6 @@ npm test
 # 启动主程序
 npm start
 
-# 运行环境测试
-npm test
-
 # 手动安装依赖
 npm run install-deps
 
@@ -147,13 +132,11 @@ npm install
 
 ## 项目文件说明
 
-- `nexus_node_manager.js` - 主程序文件
+- `nexus_node_manager.js` - 主程序文件（使用Screen会话管理节点）
 - `package.json` - Node.js项目配置文件
-- `run.js` - Node.js启动脚本
-- `run.bat` - Windows批处理启动脚本
-- `run.sh` - Linux/macOS shell启动脚本
-- `test_environment.js` - 环境测试脚本
 - `README.md` - 说明文档
+- `logs/` - 自动生成的日志目录
+- `nexus_config.json` - 自动生成的配置文件
 
 ## Screen会话管理
 
@@ -197,41 +180,52 @@ screen -S nexus-node-1 -p 0 -X stuff "命令\n"
 
 2. **npm依赖安装失败**
    ```
-   ❌ dockerode 未安装
+   ❌ systeminformation 未安装
    ```
    **解决方案**: 运行 `npm install` 或 `npm run install-deps`
 
-3. **Docker连接失败**
+3. **Screen未安装**
    ```
-   ✗ 连接Docker失败: [错误信息]
+   ✗ Screen未安装
    ```
-   **解决方案**: 确保Docker Desktop已启动并正在运行
+   **解决方案**: 安装screen包（Linux: `sudo apt-get install screen`, macOS: `brew install screen`）
 
-4. **内存不足**
+4. **Nexus CLI未安装**
+   ```
+   ✗ Nexus CLI未安装
+   ```
+   **解决方案**: 运行 `curl https://cli.nexus.xyz/ | sh` 手动安装
+
+5. **内存不足**
    ```
    建议最大节点数: 0
    ```
    **解决方案**: 增加系统内存或减少其他程序的使用
 
-5. **端口冲突**
+6. **会话创建失败**
    ```
-   容器创建失败: port already in use
+   创建会话失败: [错误信息]
    ```
-   **解决方案**: 停止冲突的容器或服务
+   **解决方案**: 检查screen安装状态和系统权限
 
 ### 手动清理
 
-如果脚本异常退出，可以手动清理容器：
+如果脚本异常退出，可以手动清理会话：
 
 ```bash
-# 停止所有nexus容器
-docker stop $(docker ps -q --filter "name=nexus-node")
+# 查看所有nexus相关的screen会话
+screen -list | grep nexus
 
-# 删除所有nexus容器
-docker rm $(docker ps -aq --filter "name=nexus-node")
+# 停止所有nexus会话
+for session in $(screen -list | grep nexus | awk '{print $1}' | cut -d'.' -f2); do
+    screen -S "$session" -X quit
+done
 
-# 清理未使用的镜像（可选）
-docker image prune -f
+# 或者手动停止单个会话
+screen -S nexus-node-1 -X quit
+
+# 清理日志文件（可选）
+rm -rf logs/
 ```
 
 ### 重置项目
@@ -245,8 +239,11 @@ rm -rf node_modules package-lock.json
 # 重新安装依赖
 npm install
 
-# 清理Docker容器
-docker container prune -f
+# 停止所有screen会话
+screen -wipe
+
+# 清理日志和配置文件
+rm -rf logs/ nexus_config.json
 ```
 
 ## 高级配置
@@ -260,18 +257,20 @@ const cpuLimit = Math.floor(resources.cpu_cores / 0.5);
 const memoryLimit = Math.floor(resources.memory_gb / 1.0);
 ```
 
-### 修改容器基础镜像
+### 自定义日志目录
 
-在 `createNexusContainer` 函数中更改：
+修改 `createNexusSession` 函数中的日志路径：
 ```javascript
-Image: 'ubuntu:20.04'  // 可改为其他镜像
+const logDir = path.join(process.cwd(), 'logs');  // 可改为其他目录
 ```
 
 ### 自定义监控间隔
 
-在 `monitorNodes` 函数中修改：
+在 `autoMonitorMode` 函数中修改：
 ```javascript
-}, 30000); // 监控间隔毫秒数
+for (let i = 0; i < 10 && monitoring; i++) {
+    await this.sleep(1000);  // 可调整监控间隔
+}
 ```
 
 ### 修改依赖版本
@@ -280,7 +279,6 @@ Image: 'ubuntu:20.04'  // 可改为其他镜像
 ```json
 {
   "dependencies": {
-    "dockerode": "^4.0.0",
     "systeminformation": "^5.21.0"
   }
 }
@@ -293,12 +291,19 @@ Image: 'ubuntu:20.04'  // 可改为其他镜像
 主要方法：
 
 - `constructor()` - 初始化管理器
-- `checkDockerInstalled()` - 检查Docker安装状态
+- `checkScreenInstalled()` - 检查Screen安装状态
+- `checkNexusInstalled()` - 检查Nexus CLI安装状态
 - `getSystemResources()` - 获取系统资源信息
 - `getUserInput(maxNodes)` - 获取用户配置输入
-- `startNodes(config)` - 启动节点容器
+- `createNexusSession(nodeId, sessionName)` - 创建Nexus会话
+- `startNodes(config)` - 启动节点会话
+- `showSessionOverview()` - 显示会话概览
+- `showSessionDetails(index)` - 显示会话详情
+- `showSessionLogs(index, lines)` - 显示会话日志
+- `restartSession(index)` - 重启会话
+- `sendCommandToSession(sessionName, command)` - 发送命令到会话
 - `monitorNodes()` - 监控节点状态
-- `cleanup()` - 清理容器资源
+- `cleanup()` - 清理会话资源
 
 ### 配置对象格式
 
@@ -336,22 +341,26 @@ set DEBUG=nexus* && node nexus_node_manager.js
 3. **网络要求**: 确保网络连接稳定，避免节点掉线
 4. **数据备份**: 重要数据请及时备份
 5. **版本更新**: 定期检查Node.js、npm和依赖包的更新
-6. **容器管理**: 定期清理不使用的Docker容器和镜像
+6. **会话管理**: 定期清理不使用的Screen会话和日志文件
+7. **系统兼容性**: Windows用户建议使用WSL环境运行
 
 ## 技术支持
 
-- 查看日志文件了解详细错误信息
-- 检查Docker和Node.js环境配置
+- 查看日志文件了解详细错误信息（logs/ 目录下）
+- 检查Screen和Nexus CLI环境配置
 - 确保系统有足够的资源
+- 使用 `screen -list` 查看会话状态
 - 运行环境测试脚本诊断问题
 
 ## 版本历史
 
 - **v1.0.0**: 初始JavaScript版本
-  - 基础Docker节点管理功能
+  - 基础Screen会话节点管理功能
   - 自动资源检测
-  - 跨平台支持
+  - 跨平台支持（Linux/macOS/WSL）
   - 自动依赖管理
+  - 日志文件管理
+  - 会话监控和控制功能
 
 ## 许可证
 

@@ -147,37 +147,239 @@ class NexusNodeManager {
     }
 
     async checkNexusInstalled() {
+        console.log('检查Nexus CLI安装状态...');
+        
         try {
             const execAsync = promisify(exec);
-            await execAsync('nexus-network --version');
-            console.log('✓ Nexus CLI已安装');
-            return true;
+            
+            // 尝试多种方式检测Nexus CLI
+            const checkCommands = [
+                'nexus-network --version',
+                '~/.nexus/nexus-network --version',
+                'which nexus-network',
+                'ls ~/.nexus/'
+            ];
+            
+            for (const cmd of checkCommands) {
+                try {
+                    const { stdout } = await execAsync(cmd);
+                    if (stdout.trim()) {
+                        console.log('✓ Nexus CLI已安装');
+                        if (cmd.includes('--version')) {
+                            console.log(`  版本信息: ${stdout.trim()}`);
+                        } else if (cmd.includes('which')) {
+                            console.log(`  安装路径: ${stdout.trim()}`);
+                        } else if (cmd.includes('ls')) {
+                            console.log(`  文件列表: ${stdout.trim()}`);
+                        }
+                        return true;
+                    }
+                } catch (cmdError) {
+                    // 继续尝试下一个命令
+                    continue;
+                }
+            }
+            
+            console.log('✗ Nexus CLI未安装或未添加到PATH');
+            console.log('  已检查: nexus-network命令、~/.nexus目录');
+            return false;
+            
         } catch (error) {
-            console.log('✗ Nexus CLI未安装');
+            console.log('✗ Nexus CLI检测失败');
+            console.log(`  错误: ${error.message}`);
             return false;
         }
     }
 
     async installNexus() {
         console.log('正在安装Nexus CLI...');
-        const execAsync = promisify(exec);
+        console.log('==========================================');
+        console.log('将执行安装命令: curl https://cli.nexus.xyz/ | sh');
+        console.log('安装过程中可能需要您输入 "y" 确认安装');
+        console.log('==========================================\n');
         
         try {
-            // 安装Nexus CLI
-            await execAsync('curl https://cli.nexus.xyz/ | sh');
+            // 使用spawn来支持实时交互
+            await this.runInteractiveCommand('curl https://cli.nexus.xyz/ | sh');
+            
+            console.log('\n==========================================');
+            console.log('正在配置环境变量...');
             
             // 添加到PATH (根据shell类型)
             const shell = process.env.SHELL || '/bin/bash';
             const rcFile = shell.includes('zsh') ? '~/.zshrc' : '~/.bashrc';
             
+            const execAsync = promisify(exec);
             await execAsync(`echo 'export PATH=$PATH:~/.nexus' >> ${rcFile}`);
+            
             console.log('✓ Nexus CLI安装完成');
-            console.log('请重新加载shell配置: source ~/.bashrc 或 source ~/.zshrc');
+            console.log('✓ 环境变量已配置');
+            
+            // 验证安装
+            console.log('\n==========================================');
+            console.log('验证安装结果...');
+            await this.sleep(2000); // 等待文件系统同步
+            
+            if (await this.verifyNexusInstallation()) {
+                console.log('✅ Nexus CLI安装验证成功！');
+            } else {
+                console.log('⚠️  Nexus CLI安装可能需要手动配置');
+                console.log('请尝试以下步骤:');
+                console.log(`1. 重新加载shell配置: source ${rcFile}`);
+                console.log('2. 或重新启动终端');
+                console.log('3. 然后重新运行此脚本');
+            }
             
         } catch (error) {
-            console.log(`Nexus CLI安装失败: ${error.message}`);
-            console.log('请手动安装: curl https://cli.nexus.xyz/ | sh');
+            console.log(`\n❌ Nexus CLI安装失败: ${error.message}`);
+            console.log('\n手动安装方法:');
+            console.log('1. 运行命令: curl https://cli.nexus.xyz/ | sh');
+            console.log('2. 按提示输入 "y" 确认安装');
+            console.log('3. 配置环境变量: echo \'export PATH=$PATH:~/.nexus\' >> ~/.bashrc');
+            console.log('4. 重新加载配置: source ~/.bashrc');
         }
+    }
+
+    // 查找Nexus命令路径
+    async findNexusCommand() {
+        const execAsync = promisify(exec);
+        
+        // 可能的nexus命令路径
+        const possiblePaths = [
+            'nexus-network',           // 在PATH中
+            '~/.nexus/nexus-network',  // 默认安装路径
+            './nexus-network',         // 当前目录
+            '/usr/local/bin/nexus-network',  // 系统路径
+            '$HOME/.nexus/nexus-network'     // 家目录
+        ];
+        
+        for (const cmdPath of possiblePaths) {
+            try {
+                // 尝试运行--version来验证命令是否可用
+                await execAsync(`${cmdPath} --version`);
+                console.log(`  找到Nexus命令: ${cmdPath}`);
+                return cmdPath;
+            } catch (error) {
+                // 继续尝试下一个路径
+                continue;
+            }
+        }
+        
+        // 如果都找不到，尝试which命令
+        try {
+            const { stdout } = await execAsync('which nexus-network');
+            if (stdout.trim()) {
+                console.log(`  通过which找到Nexus命令: ${stdout.trim()}`);
+                return stdout.trim();
+            }
+        } catch (error) {
+            // which命令也失败了
+        }
+        
+        console.log('  ❌ 未找到可用的nexus-network命令');
+        return null;
+    }
+
+    // 验证Nexus CLI安装
+    async verifyNexusInstallation() {
+        try {
+            const execAsync = promisify(exec);
+            
+            // 尝试运行nexus命令验证安装
+            const verifyCommands = [
+                { cmd: 'nexus-network --version', desc: '检查nexus-network命令' },
+                { cmd: '~/.nexus/nexus-network --version', desc: '检查~/.nexus/nexus-network' },
+                { cmd: 'ls -la ~/.nexus/', desc: '检查安装目录' }
+            ];
+            
+            for (const { cmd, desc } of verifyCommands) {
+                try {
+                    console.log(`  ${desc}...`);
+                    const { stdout, stderr } = await execAsync(cmd);
+                    
+                    if (stdout.trim()) {
+                        console.log(`  ✅ ${desc} - 成功`);
+                        if (cmd.includes('--version')) {
+                            console.log(`     版本: ${stdout.trim()}`);
+                            return true; // 找到可工作的nexus命令
+                        } else if (cmd.includes('ls')) {
+                            console.log(`     文件: ${stdout.trim().split('\n').slice(0, 3).join(', ')}...`);
+                        }
+                    }
+                } catch (cmdError) {
+                    console.log(`  ❌ ${desc} - 失败: ${cmdError.message.split('\n')[0]}`);
+                    continue;
+                }
+            }
+            
+            return false; // 没有找到可工作的nexus命令
+            
+        } catch (error) {
+            console.log(`  ❌ 验证过程出错: ${error.message}`);
+            return false;
+        }
+    }
+
+    // 运行需要用户交互的命令
+    async runInteractiveCommand(command) {
+        return new Promise((resolve, reject) => {
+            console.log(`开始执行: ${command}\n`);
+            
+            let shell, args;
+            
+            // 根据操作系统选择合适的shell
+            if (this.system === 'win32') {
+                // Windows系统 - 检查是否在WSL中
+                if (process.env.WSL_DISTRO_NAME || process.env.WSLENV) {
+                    // 在WSL中使用bash
+                    shell = 'bash';
+                    args = ['-c', command];
+                } else {
+                    // 原生Windows，尝试使用PowerShell或cmd
+                    console.log('❌ 检测到Windows原生环境');
+                    console.log('Nexus CLI需要在Linux/macOS/WSL环境中安装');
+                    console.log('请使用WSL (Windows Subsystem for Linux) 运行此脚本');
+                    console.log('\n安装WSL方法:');
+                    console.log('1. 以管理员身份运行PowerShell');
+                    console.log('2. 执行: wsl --install');
+                    console.log('3. 重启计算机');
+                    console.log('4. 在WSL中重新运行此脚本');
+                    reject(new Error('不支持的操作系统环境'));
+                    return;
+                }
+            } else {
+                // Linux/macOS使用bash
+                shell = 'bash';
+                args = ['-c', command];
+            }
+            
+            const child = spawn(shell, args, {
+                stdio: 'inherit', // 继承父进程的stdin, stdout, stderr
+                shell: false // 不使用shell包装，直接执行
+            });
+            
+            child.on('close', (code) => {
+                console.log(`\n命令执行完成，退出码: ${code}`);
+                if (code === 0) {
+                    resolve();
+                } else {
+                    reject(new Error(`命令执行失败，退出码: ${code}`));
+                }
+            });
+            
+            child.on('error', (error) => {
+                console.log(`\n❌ 命令执行出错: ${error.message}`);
+                reject(error);
+            });
+            
+            // 添加超时处理
+            setTimeout(() => {
+                if (!child.killed) {
+                    console.log('\n⚠️  安装过程超时，但进程仍在运行...');
+                    console.log('如果安装脚本要求输入，请直接在终端中输入');
+                }
+            }, 30000); // 30秒后提示
+        });
     }
 
     async getSystemResources() {
@@ -278,8 +480,31 @@ class NexusNodeManager {
             
             const logFile = path.join(logDir, `${sessionName}.log`);
             
+            // 查找正确的nexus命令路径
+            const nexusCmd = await this.findNexusCommand();
+            if (!nexusCmd) {
+                throw new Error('无法找到nexus-network命令，请确认Nexus CLI已正确安装');
+            }
+            
             // 创建screen会话并启动Nexus节点
-            const screenCmd = `screen -dmS ${sessionName} -L -Logfile ${logFile} bash -c 'nexus-network start --node-id ${nodeId}; exec bash'`;
+            const startScript = `
+            echo "=== Nexus节点启动日志 - $(date) ===" >> ${logFile}
+            echo "节点ID: ${nodeId}" >> ${logFile}
+            echo "会话名称: ${sessionName}" >> ${logFile}
+            echo "使用命令: ${nexusCmd}" >> ${logFile}
+            echo "=================================" >> ${logFile}
+            
+            # 设置环境变量
+            export PATH=$PATH:~/.nexus
+            
+            # 启动nexus节点
+            ${nexusCmd} start --node-id ${nodeId}
+            
+            # 保持会话活跃
+            exec bash
+            `;
+            
+            const screenCmd = `screen -dmS ${sessionName} -L -Logfile ${logFile} bash -c '${startScript}'`;
             
             console.log(`  执行: ${screenCmd}`);
             await execAsync(screenCmd);
@@ -470,8 +695,32 @@ class NexusNodeManager {
             // 等待会话完全停止
             await this.sleep(2000);
             
+            // 查找正确的nexus命令路径
+            const nexusCmd = await this.findNexusCommand();
+            if (!nexusCmd) {
+                throw new Error('无法找到nexus-network命令');
+            }
+            
             // 创建新会话
-            const screenCmd = `screen -dmS ${session.name} -L -Logfile ${session.logFile} bash -c 'nexus-network start --node-id ${session.nodeId}; exec bash'`;
+            const restartScript = `
+            echo "=== Nexus节点重启日志 - $(date) ===" >> ${session.logFile}
+            echo "节点ID: ${session.nodeId}" >> ${session.logFile}
+            echo "会话名称: ${session.name}" >> ${session.logFile}
+            echo "重启原因: 手动重启" >> ${session.logFile}
+            echo "使用命令: ${nexusCmd}" >> ${session.logFile}
+            echo "=================================" >> ${session.logFile}
+            
+            # 设置环境变量
+            export PATH=$PATH:~/.nexus
+            
+            # 启动nexus节点
+            ${nexusCmd} start --node-id ${session.nodeId}
+            
+            # 保持会话活跃
+            exec bash
+            `;
+            
+            const screenCmd = `screen -dmS ${session.name} -L -Logfile ${session.logFile} bash -c '${restartScript}'`;
             await execAsync(screenCmd);
             
             // 更新会话信息
