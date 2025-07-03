@@ -1,18 +1,20 @@
 # Nexus节点管理器 (JavaScript版本)
 
-自动化Docker节点部署工具，用于管理多个Nexus网络节点。
+使用Screen会话管理多个Nexus网络节点的自动化部署工具。
 
 ## 功能特性
 
-- ✅ 自动检测并安装Docker
+- ✅ 自动检测并安装Screen和Nexus CLI
 - ✅ 智能检测系统资源（CPU、内存）
 - ✅ 自动计算最大可运行节点数
 - ✅ 交互式用户配置界面
-- ✅ 在Docker容器中隔离运行节点
-- ✅ 实时监控节点状态
+- ✅ 使用Screen会话隔离运行节点
+- ✅ 实时监控节点状态和资源使用
 - ✅ 配置保存和恢复
-- ✅ 跨平台支持（Windows/Linux/macOS）
+- ✅ 跨平台支持（Linux/macOS/WSL）
 - ✅ 自动依赖管理和安装
+- ✅ 日志文件管理和查看
+- ✅ 会话重启和命令发送功能
 
 ## 系统要求
 
@@ -83,28 +85,34 @@ npm test
 
 1. **依赖检查和安装**
    - 脚本会自动检查并安装所需的npm包
-   - 主要依赖：`dockerode`、`systeminformation`
+   - 主要依赖：`systeminformation`
 
-2. **Docker安装检查**
-   - 脚本会自动检查Docker是否已安装
+2. **Screen安装检查**
+   - 脚本会自动检查Screen是否已安装
    - 如果未安装，会提示安装方法
 
-3. **系统资源检测**
+3. **Nexus CLI安装检查**
+   - 脚本会自动检查Nexus CLI是否已安装
+   - 如果未安装，会自动下载并安装
+
+4. **系统资源检测**
    - 自动检测CPU核心数和内存大小
    - 计算建议的最大节点数
 
-4. **用户配置**
+5. **用户配置**
    - 输入要运行的节点数量
    - 为每个节点输入节点ID
 
-5. **节点部署**
-   - 自动创建Docker容器
-   - 在每个容器中安装Nexus CLI
-   - 启动节点
+6. **节点部署**
+   - 自动创建Screen会话
+   - 在每个会话中启动Nexus节点
+   - 生成日志文件
 
-6. **监控模式**
+7. **监控模式**
    - 实时显示节点状态
-   - 显示节点日志
+   - 查看节点日志
+   - 重启会话功能
+   - 发送命令到会话
    - 按Ctrl+C退出监控
 
 ### 配置文件
@@ -147,36 +155,34 @@ npm install
 - `test_environment.js` - 环境测试脚本
 - `README.md` - 说明文档
 
-## Docker容器管理
+## Screen会话管理
 
-### 查看运行中的容器
+### 查看运行中的会话
 ```bash
-docker ps
+screen -list
 ```
 
-### 查看所有容器（包括停止的）
+### 连接到特定会话
 ```bash
-docker ps -a
+screen -r nexus-node-1
 ```
 
-### 进入特定容器
+### 分离会话（不停止）
+在会话中按 `Ctrl+A` 然后按 `D`
+
+### 查看会话日志
 ```bash
-docker exec -it nexus-node-1 /bin/bash
+tail -f logs/nexus-node-1.log
 ```
 
-### 查看容器日志
+### 手动停止会话
 ```bash
-docker logs nexus-node-1
+screen -S nexus-node-1 -X quit
 ```
 
-### 手动停止容器
+### 向会话发送命令
 ```bash
-docker stop nexus-node-1
-```
-
-### 手动删除容器
-```bash
-docker rm nexus-node-1
+screen -S nexus-node-1 -p 0 -X stuff "命令\n"
 ```
 
 ## 故障排除
