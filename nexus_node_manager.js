@@ -352,44 +352,273 @@ class NexusNodeManager {
         }
     }
 
-    async monitorNodes() {
-        console.log('\n节点监控 (按Ctrl+C退出):');
+    async showContainerDetails(containerIndex) {
+        const container = this.containers[containerIndex];
+        if (!container) {
+            console.log('容器不存在');
+            return;
+        }
+
+        try {
+            const info = await container.inspect();
+            const stats = await container.stats({ stream: false });
+            
+            console.log(`\n=== 节点 ${containerIndex + 1} 详细信息 ===`);
+            console.log(`容器ID: ${info.Id.substring(0, 12)}`);
+            console.log(`容器名称: ${info.Name}`);
+            console.log(`状态: ${info.State.Status}`);
+            console.log(`启动时间: ${new Date(info.State.StartedAt).toLocaleString()}`);
+            console.log(`重启次数: ${info.RestartCount}`);
+            
+            // 网络信息
+            const networks = Object.keys(info.NetworkSettings.Networks);
+            if (networks.length > 0) {
+                const network = info.NetworkSettings.Networks[networks[0]];
+                console.log(`IP地址: ${network.IPAddress || '未分配'}`);
+            }
+            
+            // 资源使用情况
+            if (stats && stats.memory_stats && stats.cpu_stats) {
+                const memoryUsageMB = stats.memory_stats.usage / 1024 / 1024;
+                const memoryLimitMB = stats.memory_stats.limit / 1024 / 1024;
+                const memoryPercent = (memoryUsageMB / memoryLimitMB * 100).toFixed(1);
+                
+                console.log(`内存使用: ${memoryUsageMB.toFixed(1)} MB / ${memoryLimitMB.toFixed(1)} MB (${memoryPercent}%)`);
+                
+                // CPU使用率计算
+                const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - (stats.precpu_stats.cpu_usage?.total_usage || 0);
+                const systemDelta = stats.cpu_stats.system_cpu_usage - (stats.precpu_stats.system_cpu_usage || 0);
+                const cpuPercent = systemDelta > 0 ? (cpuDelta / systemDelta * 100).toFixed(1) : 0;
+                
+                console.log(`CPU使用率: ${cpuPercent}%`);
+            }
+            
+        } catch (error) {
+            console.log(`获取容器详情失败: ${error.message}`);
+        }
+    }
+
+    async showContainerLogs(containerIndex, lines = 50) {
+        const container = this.containers[containerIndex];
+        if (!container) {
+            console.log('容器不存在');
+            return;
+        }
+
+        try {
+            console.log(`\n=== 节点 ${containerIndex + 1} 最新 ${lines} 行日志 ===`);
+            const logs = await container.logs({
+                stdout: true,
+                stderr: true,
+                tail: lines,
+                timestamps: true
+            });
+            
+            const logStr = logs.toString();
+            if (logStr.trim()) {
+                console.log(logStr);
+            } else {
+                console.log('暂无日志');
+            }
+        } catch (error) {
+            console.log(`获取日志失败: ${error.message}`);
+        }
+    }
+
+    async restartContainer(containerIndex) {
+        const container = this.containers[containerIndex];
+        if (!container) {
+            console.log('容器不存在');
+            return;
+        }
+
+        try {
+            console.log(`正在重启节点 ${containerIndex + 1}...`);
+            await container.restart();
+            console.log(`✓ 节点 ${containerIndex + 1} 重启成功`);
+        } catch (error) {
+            console.log(`✗ 重启失败: ${error.message}`);
+        }
+    }
+
+    async showContainerOverview() {
+        console.clear();
+        console.log('='.repeat(80));
+        console.log(`                    Nexus节点概览 - ${new Date().toLocaleString()}`);
+        console.log('='.repeat(80));
+        
+        if (this.containers.length === 0) {
+            console.log('暂无运行中的容器');
+            return;
+        }
+
+        for (let i = 0; i < this.containers.length; i++) {
+            const container = this.containers[i];
+            try {
+                const info = await container.inspect();
+                const stats = await container.stats({ stream: false });
+                
+                // 状态指示器
+                const statusIcon = info.State.Status === 'running' ? '🟢' : 
+                                 info.State.Status === 'exited' ? '🔴' : '🟡';
+                
+                console.log(`\n${statusIcon} 节点 ${i + 1} (${info.Id.substring(0, 12)})`);
+                console.log(`   状态: ${info.State.Status}`);
+                console.log(`   运行时间: ${this.getUptime(info.State.StartedAt)}`);
+                
+                if (stats && stats.memory_stats) {
+                    const memoryUsageMB = (stats.memory_stats.usage / 1024 / 1024).toFixed(0);
+                    console.log(`   内存: ${memoryUsageMB} MB`);
+                }
+                
+                // 获取最新日志
+                const logs = await container.logs({
+                    stdout: true,
+                    stderr: true,
+                    tail: 1
+                });
+                
+                const logStr = logs.toString().trim();
+                if (logStr) {
+                    const lastLog = logStr.split('\n').pop();
+                    const truncatedLog = lastLog.length > 60 ? lastLog.substring(0, 60) + '...' : lastLog;
+                    console.log(`   最新: ${truncatedLog}`);
+                }
+                
+            } catch (error) {
+                console.log(`\n❌ 节点 ${i + 1}: 获取信息失败 - ${error.message}`);
+            }
+        }
+        
+        console.log('\n' + '-'.repeat(80));
+    }
+
+    getUptime(startedAt) {
+        const start = new Date(startedAt);
+        const now = new Date();
+        const diff = now - start;
+        
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        
+        if (hours > 0) {
+            return `${hours}小时${minutes}分钟`;
+        } else {
+            return `${minutes}分钟`;
+        }
+    }
+
+    async showInteractiveMenu() {
+        while (true) {
+            console.log('\n📋 容器管理菜单:');
+            console.log('1. 查看所有容器概览');
+            console.log('2. 查看特定容器详情');
+            console.log('3. 查看特定容器日志');
+            console.log('4. 重启特定容器');
+            console.log('5. 自动监控模式');
+            console.log('0. 退出程序');
+            
+            const choice = await this.question('\n请选择操作 (0-5): ');
+            
+            switch (choice) {
+                case '1':
+                    await this.showContainerOverview();
+                    break;
+                    
+                case '2':
+                    if (this.containers.length === 0) {
+                        console.log('暂无容器');
+                        break;
+                    }
+                    const detailIndex = await this.question(`请输入容器编号 (1-${this.containers.length}): `);
+                    const index = parseInt(detailIndex) - 1;
+                    if (index >= 0 && index < this.containers.length) {
+                        await this.showContainerDetails(index);
+                    } else {
+                        console.log('无效的容器编号');
+                    }
+                    break;
+                    
+                case '3':
+                    if (this.containers.length === 0) {
+                        console.log('暂无容器');
+                        break;
+                    }
+                    const logIndex = await this.question(`请输入容器编号 (1-${this.containers.length}): `);
+                    const logLines = await this.question('显示行数 (默认50): ') || '50';
+                    const lIndex = parseInt(logIndex) - 1;
+                    if (lIndex >= 0 && lIndex < this.containers.length) {
+                        await this.showContainerLogs(lIndex, parseInt(logLines));
+                    } else {
+                        console.log('无效的容器编号');
+                    }
+                    break;
+                    
+                case '4':
+                    if (this.containers.length === 0) {
+                        console.log('暂无容器');
+                        break;
+                    }
+                    const restartIndex = await this.question(`请输入容器编号 (1-${this.containers.length}): `);
+                    const rIndex = parseInt(restartIndex) - 1;
+                    if (rIndex >= 0 && rIndex < this.containers.length) {
+                        await this.restartContainer(rIndex);
+                    } else {
+                        console.log('无效的容器编号');
+                    }
+                    break;
+                    
+                case '5':
+                    await this.autoMonitorMode();
+                    break;
+                    
+                case '0':
+                    await this.handleExit();
+                    return;
+                    
+                default:
+                    console.log('无效选择，请重新输入');
+            }
+            
+            if (choice !== '5') {
+                await this.waitForInput('\n按Enter继续...');
+            }
+        }
+    }
+
+    async autoMonitorMode() {
+        console.log('\n🔄 自动监控模式 (按Ctrl+C返回菜单)');
         console.log('-'.repeat(50));
         
-        const monitorInterval = setInterval(async () => {
-            console.log(`\n时间: ${new Date().toLocaleString()}`);
-            
-            for (let i = 0; i < this.containers.length; i++) {
-                const container = this.containers[i];
-                try {
-                    const info = await container.inspect();
-                    const status = info.State.Status;
-                    console.log(`节点 ${i + 1}: ${status}`);
-                    
-                    // 获取容器日志的最后几行
-                    const logs = await container.logs({
-                        stdout: true,
-                        stderr: true,
-                        tail: 3
-                    });
-                    
-                    const logStr = logs.toString().trim();
-                    if (logStr) {
-                        const lines = logStr.split('\n');
-                        console.log(`  最新日志: ${lines[lines.length - 1]}`);
-                    }
-                } catch (error) {
-                    console.log(`节点 ${i + 1}: 错误 - ${error.message}`);
-                }
-            }
-        }, 30000); // 每30秒检查一次
+        let monitoring = true;
         
-        // 处理Ctrl+C
-        process.on('SIGINT', () => {
-            clearInterval(monitorInterval);
-            console.log('\n停止监控...');
-            this.handleExit();
-        });
+        const sigintHandler = () => {
+            monitoring = false;
+            console.log('\n停止自动监控，返回菜单...');
+        };
+        
+        process.on('SIGINT', sigintHandler);
+        
+        while (monitoring) {
+            await this.showContainerOverview();
+            
+            // 等待10秒，但每秒检查一次是否需要退出
+            for (let i = 0; i < 10 && monitoring; i++) {
+                await this.sleep(1000);
+            }
+        }
+        
+        process.removeListener('SIGINT', sigintHandler);
+    }
+
+    async monitorNodes() {
+        console.log('\n🚀 节点部署完成！');
+        
+        // 先显示一次概览
+        await this.showContainerOverview();
+        
+        // 进入交互式菜单
+        await this.showInteractiveMenu();
     }
 
     async cleanup() {
