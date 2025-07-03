@@ -38,8 +38,8 @@
 
 ### 2. 克隆项目
 ```bash
-git clone <repository-url>
-cd nexus-node-manager
+git clone https://github.com/mumumusf/Nexus.git
+cd Nexus
 ```
 
 ### 3. 运行脚本
