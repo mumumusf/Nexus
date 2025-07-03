@@ -23,7 +23,7 @@ NC='\033[0m' # No Color
 DOCKER_IMAGE="nexusxyz/nexus-zkvm:latest"
 NETWORK_NAME="nexus-network"
 CONTAINER_PREFIX="nexus-node"
-DEFAULT_NODE_ID="6520503"
+# 不设置默认节点ID，强制用户输入
 
 # 监控配置
 REFRESH_INTERVAL=5
@@ -110,34 +110,124 @@ check_requirements() {
     log_success "系统要求检查完成"
 }
 
+# 检查Docker是否完全准备好运行容器
+check_docker_ready() {
+    log_info "正在检查 Docker 运行状态..."
+    
+    # 检查Docker命令是否可用
+    if ! command -v docker &> /dev/null; then
+        log_error "Docker 未安装，请先安装 Docker"
+        return 1
+    fi
+    
+    # 检查Docker服务是否运行
+    if ! systemctl is-active --quiet docker; then
+        log_error "Docker 服务未运行，正在尝试启动..."
+        sudo systemctl start docker
+        sleep 3
+        
+        if ! systemctl is-active --quiet docker; then
+            log_error "Docker 服务启动失败，请手动检查"
+            return 1
+        fi
+    fi
+    
+    # 检查当前用户是否有Docker权限
+    if ! docker info >/dev/null 2>&1; then
+        log_warning "当前用户没有 Docker 权限，尝试使用 sudo..."
+        
+        if ! sudo docker info >/dev/null 2>&1; then
+            log_error "Docker 无法正常工作，请检查安装"
+            return 1
+        fi
+        
+        log_warning "需要使用 sudo 运行 Docker 命令"
+        log_info "建议执行 'newgrp docker' 或重新登录以获得正确权限"
+    fi
+    
+    # 测试Docker功能
+    log_info "测试 Docker 基本功能..."
+    if docker run --rm hello-world >/dev/null 2>&1; then
+        log_success "Docker 运行正常，可以启动节点"
+        return 0
+    else
+        log_error "Docker 测试失败，无法正常运行容器"
+        log_info "请检查："
+        echo "  1. Docker 服务是否正常运行: systemctl status docker"
+        echo "  2. 用户权限是否正确: groups \$USER"
+        echo "  3. 网络连接是否正常"
+        return 1
+    fi
+}
+
 # 安装Docker
 install_docker() {
     log_info "正在安装 Docker..."
     
     # 检测操作系统
     if [ -f /etc/debian_version ]; then
-        # Debian/Ubuntu
-        sudo apt-get update
-        sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+        # Ubuntu/Debian 系统 - 使用官方推荐的安装方法
+        log_info "检测到 Ubuntu/Debian 系统，使用官方安装方法..."
+        
+        # 1. 升级系统并安装必要工具
+        sudo apt update && sudo apt install -y \
+            ca-certificates curl gnupg lsb-release
+        
+        # 2. 添加 Docker 官方 GPG 密钥
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        
+        # 3. 添加 Docker 软件源
+        echo \
+          "deb [arch=$(dpkg --print-architecture) \
+          signed-by=/etc/apt/keyrings/docker.gpg] \
+          https://download.docker.com/linux/ubuntu \
+          $(lsb_release -cs) stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # 4. 安装 Docker Engine 和相关组件
+        sudo apt update
+        sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        
     elif [ -f /etc/redhat-release ]; then
-        # CentOS/RHEL
+        # CentOS/RHEL 系统
+        log_info "检测到 CentOS/RHEL 系统..."
         sudo yum install -y yum-utils
         sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-        sudo yum install -y docker-ce docker-ce-cli containerd.io
+        sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     else
         log_error "不支持的操作系统，请手动安装 Docker"
         exit 1
     fi
     
-    # 将当前用户添加到docker组
+    # 5. 启动并设置 Docker 开机自启
+    log_info "启动 Docker 服务..."
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    
+    # 6. 将当前用户添加到docker组
+    log_info "配置用户权限..."
     sudo usermod -aG docker $USER
     
+    # 7. 验证安装
+    log_info "验证 Docker 安装..."
+    if sudo docker run hello-world >/dev/null 2>&1; then
+        log_success "Docker 安装并验证成功"
+    else
+        log_warning "Docker 安装完成，但验证失败，可能需要重新登录"
+    fi
+    
     log_success "Docker 安装完成"
-    log_warning "请重新登录或执行 'newgrp docker' 以应用用户组更改"
+    log_warning "请执行 'newgrp docker' 或重新登录以应用用户组更改"
+    
+    # 提示用户应用权限更改
+    echo
+    log_info "正在应用用户权限更改..."
+    if command -v newgrp >/dev/null 2>&1; then
+        log_info "执行 'newgrp docker' 应用权限..."
+        newgrp docker
+    fi
 }
 
 # ============================================================================
@@ -236,22 +326,22 @@ get_node_configuration() {
     log_info "将启动 $NODE_COUNT 个节点"
     echo
     
-    # 获取起始节点ID
+    # 获取起始节点ID（强制用户输入）
     while true; do
-        read -p "请输入起始节点ID [默认: $DEFAULT_NODE_ID]: " INPUT_START_ID
+        read -p "请输入起始节点ID（必填）: " INPUT_START_ID
         
-        # 如果用户直接回车，使用默认值
+        # 检查用户是否输入了内容
         if [ -z "$INPUT_START_ID" ]; then
-            START_NODE_ID=$DEFAULT_NODE_ID
-            break
+            log_error "节点ID不能为空，请输入一个有效的节点ID"
+            continue
         fi
         
         # 验证输入（简单验证数字）
-        if [[ "$INPUT_START_ID" =~ ^[0-9]+$ ]]; then
+        if [[ "$INPUT_START_ID" =~ ^[0-9]+$ ]] && [ "$INPUT_START_ID" -gt 0 ]; then
             START_NODE_ID=$INPUT_START_ID
             break
         else
-            log_error "请输入有效的数字节点ID"
+            log_error "请输入有效的正整数节点ID"
         fi
     done
     
@@ -800,8 +890,11 @@ show_main_menu() {
                 get_memory_info
                 calculate_recommended_nodes
                 if get_node_configuration; then
-                    pull_docker_image && create_network && stop_existing_containers && start_nodes
-                    show_status
+                    # 检查Docker状态后再启动节点
+                    if check_docker_ready; then
+                        pull_docker_image && create_network && stop_existing_containers && start_nodes
+                        show_status
+                    fi
                 fi
                 ;;
             2)
@@ -888,19 +981,39 @@ EOF
         
         case "$CHOICE" in
             1)
-                # 一键启动
+                # 一键启动 - 需要用户输入节点ID
                 echo
-                log_info "一键启动模式 - 使用推荐配置"
+                log_info "一键启动模式 - 使用推荐配置，但需要输入节点ID"
                 get_memory_info
                 calculate_recommended_nodes
                 NODE_COUNT=$RECOMMENDED_NODES
-                START_NODE_ID=$DEFAULT_NODE_ID
+                
+                # 强制用户输入节点ID
+                while true; do
+                    read -p "请输入起始节点ID（必填）: " INPUT_START_ID
+                    
+                    if [ -z "$INPUT_START_ID" ]; then
+                        log_error "节点ID不能为空，请输入一个有效的节点ID"
+                        continue
+                    fi
+                    
+                    if [[ "$INPUT_START_ID" =~ ^[0-9]+$ ]] && [ "$INPUT_START_ID" -gt 0 ]; then
+                        START_NODE_ID=$INPUT_START_ID
+                        break
+                    else
+                        log_error "请输入有效的正整数节点ID"
+                    fi
+                done
+                
                 echo
                 log_info "将启动 $NODE_COUNT 个节点，起始ID: $START_NODE_ID"
                 read -p "确认启动? [Y/n]: " CONFIRM
                 if [[ ! "$CONFIRM" =~ ^[Nn]$ ]]; then
-                    pull_docker_image && create_network && stop_existing_containers && start_nodes
-                    show_status
+                    # 检查Docker状态后再启动节点
+                    if check_docker_ready; then
+                        pull_docker_image && create_network && stop_existing_containers && start_nodes
+                        show_status
+                    fi
                 fi
                 ;;
             2)
@@ -910,8 +1023,11 @@ EOF
                 get_memory_info
                 calculate_recommended_nodes
                 if get_node_configuration; then
-                    pull_docker_image && create_network && stop_existing_containers && start_nodes
-                    show_status
+                    # 检查Docker状态后再启动节点
+                    if check_docker_ready; then
+                        pull_docker_image && create_network && stop_existing_containers && start_nodes
+                        show_status
+                    fi
                 fi
                 ;;
             3)
