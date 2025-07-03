@@ -153,7 +153,7 @@ create_nexus_script() {
 
 # 启用详细日志和错误处理
 set -x  # 显示执行的每条命令
-set -e  # 遇到错误立即退出
+# 注意：不使用 set -e，因为我们有自定义错误处理
 
 echo "===================="
 echo "开始安装Nexus CLI..."
@@ -176,43 +176,91 @@ ping -c 2 8.8.8.8 || echo "⚠ 网络连接可能有问题"
 # 安装必要的依赖
 echo "### 开始安装依赖 ###"
 echo "更新软件包列表..."
-apt-get update -v
+if ! apt-get update; then
+    echo "⚠ 软件包列表更新失败，继续尝试安装..."
+fi
 
 echo "安装必要的依赖包..."
-apt-get install -y curl wget ca-certificates build-essential -v
+export DEBIAN_FRONTEND=noninteractive
+if ! apt-get install -y curl wget ca-certificates build-essential; then
+    echo "⚠ 首次安装失败，尝试修复并重新安装..."
+    apt-get --fix-broken install -y
+    apt-get install -y curl wget ca-certificates build-essential
+fi
 
 echo "验证依赖安装..."
-curl --version || echo "✗ curl安装失败"
-wget --version || echo "✗ wget安装失败"
+if curl --version > /dev/null 2>&1; then
+    echo "✓ curl安装成功: $(curl --version | head -n1)"
+else
+    echo "✗ curl安装失败，尝试重新安装..."
+    apt-get install -y curl --fix-missing
+fi
+
+if wget --version > /dev/null 2>&1; then
+    echo "✓ wget安装成功: $(wget --version | head -n1)"
+else
+    echo "✗ wget安装失败，尝试重新安装..."
+    apt-get install -y wget --fix-missing
+fi
 
 # 下载并安装Nexus CLI
 echo "### 下载Nexus CLI ###"
+
+# 再次验证依赖安装状态
+if ! command -v curl > /dev/null 2>&1; then
+    echo "✗ curl未安装，无法下载Nexus CLI"
+    exit 1
+fi
+
 echo "开始下载Nexus CLI (时间: $(date))..."
 echo "下载URL: https://cli.nexus.xyz"
 
-# 显示下载过程
-curl -L -v https://cli.nexus.xyz | sh
+# 设置下载超时和重试
+MAX_RETRIES=3
+RETRY_COUNT=0
 
-echo "Nexus CLI下载安装完成 (时间: $(date))"
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    echo "尝试下载 (第 $((RETRY_COUNT + 1)) 次)..."
+    
+    if curl -L --connect-timeout 30 --max-time 300 https://cli.nexus.xyz | sh; then
+        echo "✓ Nexus CLI下载安装完成 (时间: $(date))"
+        break
+    else
+        echo "✗ 下载失败"
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            echo "等待10秒后重试..."
+            sleep 10
+        else
+            echo "✗ 达到最大重试次数，下载失败"
+            exit 1
+        fi
+    fi
+done
 
 # 验证GLIBC版本
 echo "### GLIBC版本检查 ###"
 echo "检查GLIBC版本..."
 ldd --version
-GLIBC_VERSION=$(ldd --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' || echo "unknown")
+GLIBC_VERSION=$(ldd --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -n1 || echo "unknown")
 echo "提取的GLIBC版本: $GLIBC_VERSION"
 
 # 检查是否支持GLIBC 2.39
-if [ "$GLIBC_VERSION" != "unknown" ]; then
+if [ -n "$GLIBC_VERSION" ] && [ "$GLIBC_VERSION" != "unknown" ]; then
     GLIBC_MAJOR=$(echo $GLIBC_VERSION | cut -d. -f1)
     GLIBC_MINOR=$(echo $GLIBC_VERSION | cut -d. -f2)
     echo "GLIBC主版本: $GLIBC_MAJOR, 次版本: $GLIBC_MINOR"
     
-    if [ "$GLIBC_MAJOR" -gt 2 ] || [ "$GLIBC_MAJOR" -eq 2 -a "$GLIBC_MINOR" -ge 39 ]; then
-        echo "✓ GLIBC版本满足要求 (当前: $GLIBC_VERSION, 需要: ≥ 2.39)"
+    # 验证提取的版本号是数字
+    if [ "$GLIBC_MAJOR" -eq "$GLIBC_MAJOR" ] 2>/dev/null && [ "$GLIBC_MINOR" -eq "$GLIBC_MINOR" ] 2>/dev/null; then
+        if [ "$GLIBC_MAJOR" -gt 2 ] || ( [ "$GLIBC_MAJOR" -eq 2 ] && [ "$GLIBC_MINOR" -ge 39 ] ); then
+            echo "✓ GLIBC版本满足要求 (当前: $GLIBC_VERSION, 需要: ≥ 2.39)"
+        else
+            echo "✗ GLIBC版本不满足要求 (当前: $GLIBC_VERSION, 需要: ≥ 2.39)"
+            echo "警告: 可能影响Nexus运行"
+        fi
     else
-        echo "✗ GLIBC版本不满足要求 (当前: $GLIBC_VERSION, 需要: ≥ 2.39)"
-        echo "警告: 可能影响Nexus运行"
+        echo "✗ 版本号格式错误: 主版本=$GLIBC_MAJOR, 次版本=$GLIBC_MINOR"
     fi
 else
     echo "⚠ 无法检测GLIBC版本"
@@ -220,25 +268,50 @@ fi
 
 # 验证Nexus CLI安装
 echo "### 验证Nexus CLI安装 ###"
-echo "检查Nexus安装目录..."
-ls -la ~/
-echo "检查.nexus目录..."
-ls -la ~/.nexus/ || echo "✗ .nexus目录不存在"
-echo "检查nexus-network二进制文件..."
-ls -la ~/.nexus/bin/ || echo "✗ bin目录不存在"
+echo "检查当前用户: $(whoami)"
+echo "检查HOME目录: $HOME"
+echo "检查家目录内容..."
+ls -la $HOME/
 
-if [ -f ~/.nexus/bin/nexus-network ]; then
-    echo "✓ Nexus CLI二进制文件存在"
+# 检查可能的安装位置
+NEXUS_PATHS=(
+    "$HOME/.nexus"
+    "/root/.nexus"
+    "/usr/local/bin"
+    "/usr/bin"
+)
+
+NEXUS_BINARY=""
+NEXUS_DIR=""
+
+echo "查找Nexus安装位置..."
+for path in "${NEXUS_PATHS[@]}"; do
+    echo "检查: $path"
+    if [ -d "$path" ] && [ -f "$path/bin/nexus-network" ]; then
+        NEXUS_DIR="$path"
+        NEXUS_BINARY="$path/bin/nexus-network"
+        echo "✓ 找到Nexus目录: $NEXUS_DIR"
+        break
+    elif [ -f "$path/nexus-network" ]; then
+        NEXUS_BINARY="$path/nexus-network"
+        echo "✓ 找到Nexus二进制文件: $NEXUS_BINARY"
+        break
+    fi
+done
+
+if [ -n "$NEXUS_BINARY" ] && [ -f "$NEXUS_BINARY" ]; then
+    echo "✓ Nexus CLI二进制文件存在: $NEXUS_BINARY"
     echo "文件信息:"
-    ls -la ~/.nexus/bin/nexus-network
+    ls -la "$NEXUS_BINARY"
     echo "文件类型:"
-    file ~/.nexus/bin/nexus-network
+    file "$NEXUS_BINARY"
     echo "测试执行权限:"
-    ~/.nexus/bin/nexus-network --help || echo "⚠ 执行测试失败"
+    chmod +x "$NEXUS_BINARY"
+    "$NEXUS_BINARY" --help 2>&1 | head -n 5 || echo "⚠ 执行测试失败"
 else
     echo "✗ Nexus CLI安装失败: 二进制文件不存在"
-    echo "尝试查找可能的安装位置..."
-    find / -name "nexus-network" 2>/dev/null || echo "未找到nexus-network文件"
+    echo "尝试全局搜索..."
+    find / -name "nexus-network" -type f 2>/dev/null | head -5 || echo "未找到nexus-network文件"
     exit 1
 fi
 
@@ -260,20 +333,25 @@ ps aux
 
 # 启动节点
 echo "### 启动Nexus节点 ###"
-echo "执行命令: ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503}"
+echo "使用二进制文件: $NEXUS_BINARY"
+echo "执行命令: $NEXUS_BINARY start --node-id ${NODE_ID:-6520503}"
 echo "开始时间: $(date)"
 
 # 尝试启动节点
-if ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503} <<< "y"; then
+if "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y"; then
     echo "✓ 节点启动成功"
 else
     echo "⚠ 首次启动失败，尝试重新启动..."
     sleep 5
     echo "重试时间: $(date)"
-    ~/.nexus/bin/nexus-network start --node-id ${NODE_ID:-6520503} <<< "y" || {
+    "$NEXUS_BINARY" start --node-id ${NODE_ID:-6520503} <<< "y" || {
         echo "✗ 节点启动失败"
         echo "尝试查看错误日志..."
-        find ~/.nexus -name "*.log" -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+        if [ -n "$NEXUS_DIR" ]; then
+            find "$NEXUS_DIR" -name "*.log" -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+        else
+            find /root -name "*.log" -path "*nexus*" -exec cat {} \; 2>/dev/null || echo "未找到日志文件"
+        fi
         exit 1
     }
 fi
