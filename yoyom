@@ -1,0 +1,624 @@
+#!/bin/bash
+
+# Nexus Network 一体化管理工具
+# 作者: @YOYOMYOYOA
+# 版本: v3.0.0
+
+# 显示主要banner
+show_main_banner() {
+    echo "
+██╗  ██╗██╗ █████╗  ██████╗ ██╗     ██╗███╗   ██╗
+╚██╗██╔╝██║██╔══██╗██╔═══██╗██║     ██║████╗  ██║
+ ╚███╔╝ ██║███████║██║   ██║██║     ██║██╔██╗ ██║
+ ██╔██╗ ██║██╔══██║██║   ██║██║     ██║██║╚██╗██║
+██╔╝ ██╗██║██║  ██║╚██████╔╝███████╗██║██║ ╚████║
+╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝╚═╝  ╚═══╝
+
+    === Nexus Network 一体化管理工具 ===
+** ====================================== **
+*         此脚本仅供免费使用              *
+*         禁止出售或用于盈利              *
+** ====================================== **
+
+* 作者: @YOYOMYOYOA
+* 空投玩家 | 现货玩家 | meme收藏
+* Github: github.com/mumumusf
+
+** ====================================== **
+*            免责声明                      *
+* 此脚本仅供学习交流使用                  *
+* 使用本脚本所产生的任何后果由用户自行承担 *
+* 如果因使用本脚本造成任何损失，作者概不负责*
+** ====================================== **
+"
+}
+
+# 内存检测函数
+detect_memory() {
+    echo "🔍 正在检测系统内存..."
+    
+    # 获取总内存（单位：GB）
+    total_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    total_memory_gb=$((total_memory_kb / 1024 / 1024))
+    
+    # 获取可用内存（单位：GB）
+    available_memory_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+    available_memory_gb=$((available_memory_kb / 1024 / 1024))
+    
+    echo "💾 系统总内存: ${total_memory_gb}GB"
+    echo "💿 可用内存: ${available_memory_gb}GB"
+    
+    # 根据内存计算推荐节点数（每个节点建议4GB，但保留2GB给系统）
+    if [ $total_memory_gb -ge 6 ]; then
+        recommended_nodes=$(((total_memory_gb - 2) / 4))
+        if [ $recommended_nodes -lt 1 ]; then
+            recommended_nodes=1
+        fi
+    else
+        recommended_nodes=1
+    fi
+    
+    echo "🎯 推荐节点数量: ${recommended_nodes} 个节点"
+    echo "📊 内存分配策略: 每节点4GB，系统保留2GB"
+    echo ""
+    
+    return $recommended_nodes
+}
+
+# 安装节点功能
+install_nodes() {
+    echo "
+    === Nexus 自动化安装工具 (多开版) ===
+"
+    
+    # 检测系统内存
+    detect_memory
+    recommended_nodes=$?
+
+    # 检查是否安装了screen
+    if ! command -v screen &> /dev/null; then
+        echo "正在安装 screen..."
+        if command -v apt &> /dev/null; then
+            sudo apt update && sudo apt install -y screen
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y screen
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y screen
+        else
+            echo "错误：无法自动安装screen，请手动安装"
+            return 1
+        fi
+        echo "screen 安装完成！"
+    fi
+
+    # 安装nexus-cli（每次运行都重新安装）
+    echo "正在安装 nexus-cli 及其依赖..."
+
+    # 安装系统依赖
+    echo "📦 安装系统依赖..."
+    if command -v apt &> /dev/null; then
+        sudo apt update
+        sudo apt install -y protobuf-compiler curl
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y protobuf-compiler curl
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y protobuf-compiler curl
+    else
+        echo "错误：无法自动安装依赖，请手动安装 protobuf-compiler 和 curl"
+        return 1
+    fi
+    echo "✅ 系统依赖安装完成"
+
+    # 安装 Rust
+    echo "🦀 安装 Rust..."
+    curl https://sh.rustup.rs -sSf | sh -s -- -y
+    source $HOME/.cargo/env
+    echo "✅ Rust 安装完成"
+
+    # 设置 Rust 默认版本
+    echo "⚙️ 设置 Rust 默认版本..."
+    rustup default stable
+    echo "✅ Rust 默认版本设置完成"
+
+    # 安装 nexus-cli
+    echo "📥 安装 nexus-cli..."
+    echo "注意：如果出现条款确认提示，请输入 'y' 确认"
+    curl https://cli.nexus.xyz | sh
+    echo "✅ nexus-cli 安装完成"
+
+    # 添加 PATH 环境变量
+    echo "🔧 配置环境变量..."
+    echo 'export PATH="$HOME/.nexus/bin:$PATH"' >> ~/.bashrc
+    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
+    echo "✅ 环境变量配置完成"
+
+    echo "🎉 nexus-cli 及其依赖安装完成！"
+
+    # 询问用户是否要建立会话
+    echo ""
+    echo "=== 安装完成 ==="
+    echo "nexus-cli 已准备就绪！"
+    echo ""
+    read -p "是否要建立 Screen 会话运行节点？(y/n): " create_session
+
+    if [[ $create_session != "y" && $create_session != "Y" ]]; then
+        echo "好的，您可以稍后手动运行节点。"
+        echo "手动运行命令：nexus-network start --node-id <您的节点ID>"
+        return 0
+    fi
+
+    # 获取节点数量和ID
+    echo ""
+    echo "=== 多开节点配置 ==="
+    echo "🎯 系统推荐运行 ${recommended_nodes} 个节点"
+    echo ""
+    read -p "请输入要运行的节点数量 (1-${recommended_nodes}): " node_count
+
+    # 验证节点数量
+    if ! [[ "$node_count" =~ ^[0-9]+$ ]] || [ "$node_count" -lt 1 ] || [ "$node_count" -gt "$recommended_nodes" ]; then
+        echo "❌ 错误：节点数量必须是 1-${recommended_nodes} 之间的数字"
+        echo "根据您的内存配置，建议不要超过推荐数量"
+        return 1
+    fi
+
+    echo "✅ 将运行 ${node_count} 个节点"
+    echo ""
+
+    # 获取节点ID列表
+    declare -a NODE_IDS
+    echo "请依次输入 ${node_count} 个节点ID（纯数字）:"
+
+    for ((i=1; i<=node_count; i++)); do
+        while true; do
+            read -p "节点 $i ID: " node_id
+            
+            # 清理输入（去除空格和特殊字符）
+            node_id=$(echo "$node_id" | tr -d '[:space:]')
+            
+            # 验证节点ID
+            if [ -z "$node_id" ]; then
+                echo "❌ 错误：节点ID不能为空，请重新输入"
+                continue
+            fi
+            
+            # 检查是否只包含数字
+            if ! [[ "$node_id" =~ ^[0-9]+$ ]]; then
+                echo "❌ 错误：节点ID应该只包含数字，请重新输入"
+                continue
+            fi
+            
+            # 检查是否重复
+            duplicate=false
+            for existing_id in "${NODE_IDS[@]}"; do
+                if [ "$existing_id" = "$node_id" ]; then
+                    echo "❌ 错误：节点ID $node_id 已存在，请输入不同的ID"
+                    duplicate=true
+                    break
+                fi
+            done
+            
+            if [ "$duplicate" = false ]; then
+                NODE_IDS+=("$node_id")
+                echo "✅ 节点 $i ID验证通过: $node_id"
+                break
+            fi
+        done
+    done
+
+    echo ""
+    echo "📋 节点配置摘要:"
+    for ((i=0; i<${#NODE_IDS[@]}; i++)); do
+        echo "  节点 $((i+1)): ${NODE_IDS[$i]}"
+    done
+
+    # 检查现有会话并启动多个节点
+    echo ""
+    echo "=== 启动多个节点 ==="
+
+    # 检查是否有冲突的会话
+    conflicting_sessions=()
+    for node_id in "${NODE_IDS[@]}"; do
+        session_name="nexus_${node_id}"
+        if screen -list | grep -q "$session_name"; then
+            conflicting_sessions+=("$session_name")
+        fi
+    done
+
+    # 处理冲突会话
+    if [ ${#conflicting_sessions[@]} -gt 0 ]; then
+        echo "⚠️ 发现已存在的会话:"
+        for session in "${conflicting_sessions[@]}"; do
+            echo "  - $session"
+        done
+        echo ""
+        read -p "是否要终止现有会话并创建新会话？(y/n): " choice
+        if [[ $choice == "y" || $choice == "Y" ]]; then
+            for session in "${conflicting_sessions[@]}"; do
+                echo "🗑️ 终止会话: $session"
+                screen -S "$session" -X quit 2>/dev/null
+            done
+        else
+            echo "❌ 操作取消"
+            return 0
+        fi
+    fi
+
+    # 启动所有节点
+    echo "🚀 开始启动 ${#NODE_IDS[@]} 个节点..."
+    echo ""
+
+    # 创建启动脚本
+    for ((i=0; i<${#NODE_IDS[@]}; i++)); do
+        node_id="${NODE_IDS[$i]}"
+        session_name="nexus_${node_id}"
+        
+        echo "📡 启动节点 $((i+1))/${#NODE_IDS[@]}: $node_id"
+        
+        # 在screen会话中运行节点
+        screen -dmS "$session_name" bash -c "
+    echo '=== Nexus 节点运行中 ==='
+    echo '节点ID: $node_id'
+    echo '会话名称: $session_name'
+    echo '节点序号: $((i+1))/${#NODE_IDS[@]}'
+    echo '开始时间: \$(date)'
+    echo '内存分配: 4GB (推荐)'
+    echo ''
+
+    echo \"\$(date): 启动节点 $node_id\"
+    nexus-network start --node-id \"$node_id\"
+    "
+        
+        echo "✅ 节点 $node_id 已在Screen会话中启动！"
+        
+        # 添加启动间隔，避免同时启动造成资源冲突
+        if [ $((i+1)) -lt ${#NODE_IDS[@]} ]; then
+            echo "⏳ 等待3秒后启动下一个节点..."
+            sleep 3
+        fi
+    done
+
+    echo ""
+    echo "🎉 所有节点启动完成！"
+    echo ""
+    echo "📋 节点管理命令："
+    echo "• 查看所有会话: screen -list"
+    echo "• 连接到指定节点: screen -r nexus_<节点ID>"
+    echo "• 分离会话: 在会话中按 Ctrl+A 然后按 D"
+    echo "• 停止指定节点: screen -S nexus_<节点ID> -X quit"
+    echo "• 使用管理工具: ./yoyom"
+    echo ""
+
+    # 创建停止所有节点的脚本
+    cat > stop_all_nodes.sh << 'EOF'
+#!/bin/bash
+echo "🛑 停止所有 Nexus 节点..."
+for session in $(screen -list | grep nexus_ | awk '{print $1}'); do
+    echo "停止会话: $session"
+    screen -S "$session" -X quit 2>/dev/null
+done
+echo "✅ 所有节点已停止"
+EOF
+
+    chmod +x stop_all_nodes.sh
+
+    echo "📊 当前运行的节点:"
+    for node_id in "${NODE_IDS[@]}"; do
+        echo "  - 节点 $node_id: screen -r nexus_$node_id"
+    done
+
+    echo ""
+    echo "🌐 现在您可以安全地关闭SSH连接，所有节点会继续运行！"
+    echo "📝 已创建 stop_all_nodes.sh 脚本用于一键停止所有节点"
+    echo "🛠️ 运行 './yoyom' 进入节点管理界面"
+}
+
+# ===== 节点管理功能 =====
+
+# 检查节点状态
+check_nodes_status() {
+    echo "📊 检查节点状态..."
+    echo ""
+    
+    nexus_sessions=$(screen -list | grep nexus_ | awk '{print $1}')
+    
+    if [ -z "$nexus_sessions" ]; then
+        echo "❌ 没有发现运行中的 Nexus 节点"
+        return
+    fi
+    
+    echo "✅ 运行中的节点:"
+    echo ""
+    
+    count=1
+    for session in $nexus_sessions; do
+        node_id=$(echo "$session" | sed 's/.*nexus_//' | sed 's/\..*$//')
+        echo "  $count. 节点ID: $node_id"
+        echo "     会话名: $session"
+        echo "     连接命令: screen -r $session"
+        echo ""
+        ((count++))
+    done
+    
+    echo "总计: $((count-1)) 个节点运行中"
+}
+
+# 停止指定节点
+stop_node() {
+    read -p "请输入要停止的节点ID: " node_id
+    
+    if [ -z "$node_id" ]; then
+        echo "❌ 节点ID不能为空"
+        return
+    fi
+    
+    session_name="nexus_${node_id}"
+    
+    if screen -list | grep -q "$session_name"; then
+        echo "🛑 停止节点 $node_id..."
+        screen -S "$session_name" -X quit 2>/dev/null
+        echo "✅ 节点 $node_id 已停止"
+    else
+        echo "❌ 未找到节点 $node_id 的运行会话"
+    fi
+}
+
+# 停止所有节点
+stop_all_nodes() {
+    echo "🛑 停止所有 Nexus 节点..."
+    
+    nexus_sessions=$(screen -list | grep nexus_ | awk '{print $1}')
+    
+    if [ -z "$nexus_sessions" ]; then
+        echo "❌ 没有发现运行中的 Nexus 节点"
+        return
+    fi
+    
+    for session in $nexus_sessions; do
+        node_id=$(echo "$session" | sed 's/.*nexus_//' | sed 's/\..*$//')
+        echo "停止节点: $node_id"
+        screen -S "$session" -X quit 2>/dev/null
+    done
+    
+    echo "✅ 所有节点已停止"
+}
+
+# 连接到指定节点
+connect_to_node() {
+    check_nodes_status
+    
+    if [ "$(screen -list | grep nexus_ | wc -l)" -eq 0 ]; then
+        return
+    fi
+    
+    read -p "请输入要连接的节点ID: " node_id
+    
+    if [ -z "$node_id" ]; then
+        echo "❌ 节点ID不能为空"
+        return
+    fi
+    
+    session_name="nexus_${node_id}"
+    
+    if screen -list | grep -q "$session_name"; then
+        echo "🔗 连接到节点 $node_id..."
+        echo "提示: 按 Ctrl+A 然后 D 分离会话"
+        screen -r "$session_name"
+    else
+        echo "❌ 未找到节点 $node_id 的运行会话"
+    fi
+}
+
+# 显示系统资源使用情况
+show_system_resources() {
+    echo "💻 系统资源使用情况:"
+    echo ""
+    
+    # 内存使用情况
+    total_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    available_memory_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+    used_memory_kb=$((total_memory_kb - available_memory_kb))
+    
+    total_memory_gb=$((total_memory_kb / 1024 / 1024))
+    used_memory_gb=$((used_memory_kb / 1024 / 1024))
+    available_memory_gb=$((available_memory_kb / 1024 / 1024))
+    
+    memory_usage_percent=$((used_memory_gb * 100 / total_memory_gb))
+    
+    echo "📊 内存使用:"
+    echo "  总内存: ${total_memory_gb}GB"
+    echo "  已使用: ${used_memory_gb}GB (${memory_usage_percent}%)"
+    echo "  可用内存: ${available_memory_gb}GB"
+    echo ""
+    
+    # CPU使用情况
+    cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | sed 's/%us,//')
+    echo "🖥️ CPU使用率: ${cpu_usage}%"
+    echo ""
+    
+    # 磁盘使用情况
+    echo "💾 磁盘使用:"
+    df -h / | tail -1 | awk '{print "  根目录: " $3 "/" $2 " (" $5 " 已使用)"}'
+    echo ""
+    
+    # 运行中的节点数量
+    nexus_count=$(screen -list | grep nexus_ | wc -l)
+    echo "🚀 运行中的节点: ${nexus_count} 个"
+    
+    if [ $nexus_count -gt 0 ]; then
+        estimated_memory=$((nexus_count * 4))
+        echo "📈 预估节点内存使用: ${estimated_memory}GB"
+    fi
+}
+
+# 管理菜单
+show_management_menu() {
+    echo ""
+    echo "============= 节点管理菜单 =============="
+    echo "1. 📊 查看节点状态"
+    echo "2. 🔗 连接到指定节点"
+    echo "3. 🛑 停止指定节点"
+    echo "4. 🚫 停止所有节点"
+    echo "5. 💻 查看系统资源"
+    echo "6. 🔄 刷新菜单"
+    echo "9. 🔙 返回主菜单"
+    echo "0. 🚪 退出"
+    echo "====================================="
+    echo ""
+}
+
+# 节点管理主程序
+manage_nodes() {
+    echo "
+    === Nexus 节点管理工具 ===
+"
+    
+    while true; do
+        show_management_menu
+        read -p "请选择操作 (0-6,9): " choice
+        
+        case $choice in
+            1)
+                check_nodes_status
+                ;;
+            2)
+                connect_to_node
+                ;;
+            3)
+                stop_node
+                ;;
+            4)
+                read -p "确认停止所有节点？(y/n): " confirm
+                if [[ $confirm == "y" || $confirm == "Y" ]]; then
+                    stop_all_nodes
+                fi
+                ;;
+            5)
+                show_system_resources
+                ;;
+            6)
+                clear
+                show_main_banner
+                echo "
+    === Nexus 节点管理工具 ===
+"
+                ;;
+            9)
+                return 0
+                ;;
+            0)
+                echo "👋 再见！"
+                exit 0
+                ;;
+            *)
+                echo "❌ 无效选择，请输入 0-6 或 9"
+                ;;
+        esac
+        
+        echo ""
+        read -p "按回车键继续..."
+    done
+}
+
+# 主菜单
+show_main_menu() {
+    echo ""
+    echo "=============== 主菜单 ==============="
+    echo "1. 🚀 安装并启动 Nexus 节点"
+    echo "2. 🛠️ 管理现有节点"
+    echo "3. 💻 查看系统资源"
+    echo "4. ℹ️ 显示帮助信息"
+    echo "0. 🚪 退出"
+    echo "===================================="
+    echo ""
+}
+
+# 显示帮助信息
+show_help() {
+    echo "
+📖 === Nexus Network 一体化管理工具帮助 ===
+
+🚀 主要功能:
+  1. 自动检测系统内存并推荐节点数量
+  2. 一键安装 nexus-cli 和相关依赖
+  3. 支持多个节点同时运行
+  4. 完整的节点管理功能
+  5. 实时系统资源监控
+
+📋 使用流程:
+  1. 首次使用选择 '安装并启动 Nexus 节点'
+  2. 按照提示输入节点数量和 ID
+  3. 后续使用选择 '管理现有节点' 进行管理
+
+🔧 常用命令:
+  • 查看所有会话: screen -list
+  • 连接到节点: screen -r nexus_<节点ID>
+  • 分离会话: Ctrl+A 然后 D
+  • 停止单个节点: screen -S nexus_<节点ID> -X quit
+  • 停止所有节点: ./stop_all_nodes.sh
+
+💾 内存要求:
+  • 每个节点需要 4GB 内存
+  • 系统保留 2GB 内存
+  • 例如: 10GB 内存可运行 2 个节点
+
+❓ 获取节点ID:
+  访问 https://nexus.xyz 注册并创建节点
+
+⚠️ 注意事项:
+  • 节点ID 必须是纯数字
+  • 不要超过系统推荐的节点数量
+  • SSH 断开后节点会继续运行
+"
+}
+
+# 主程序
+main() {
+    show_main_banner
+    
+    while true; do
+        show_main_menu
+        read -p "请选择操作 (0-4): " choice
+        
+        case $choice in
+            1)
+                install_nodes
+                ;;
+            2)
+                manage_nodes
+                ;;
+            3)
+                show_system_resources
+                echo ""
+                read -p "按回车键继续..."
+                ;;
+            4)
+                show_help
+                echo ""
+                read -p "按回车键继续..."
+                ;;
+            0)
+                echo "👋 感谢使用 Nexus Network 一体化管理工具！"
+                exit 0
+                ;;
+            *)
+                echo "❌ 无效选择，请输入 0-4"
+                ;;
+        esac
+        
+        echo ""
+    done
+}
+
+# 检查参数并运行
+if [ "$1" = "--install" ]; then
+    # 直接安装模式
+    show_main_banner
+    install_nodes
+elif [ "$1" = "--manage" ]; then
+    # 直接管理模式
+    show_main_banner
+    manage_nodes
+else
+    # 交互模式
+    main
+fi 
