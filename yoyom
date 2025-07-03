@@ -2,7 +2,10 @@
 
 # Nexus Network 一体化管理工具
 # 作者: @YOYOMYOYOA
-# 版本: v4.0.0
+# 版本: v4.1.0
+
+# 全局变量
+SESSION_MANAGER=""
 
 # 环境检测函数
 detect_environment() {
@@ -10,12 +13,17 @@ detect_environment() {
     if grep -qi microsoft /proc/version 2>/dev/null; then
         ENVIRONMENT="WSL"
         echo "🔍 检测到 Windows WSL 环境"
+        SESSION_MANAGER="tmux"
+        echo "🛠️ WSL环境将使用 tmux 管理会话"
     elif [[ -f /proc/version ]]; then
         ENVIRONMENT="LINUX"
         echo "🔍 检测到 Linux 环境"
+        SESSION_MANAGER="screen"
+        echo "🛠️ Linux环境将使用 screen 管理会话"
     else
         ENVIRONMENT="UNKNOWN"
         echo "⚠️ 未知环境，将按Linux方式运行"
+        SESSION_MANAGER="screen"
     fi
     
     # 检测发行版
@@ -28,6 +36,7 @@ detect_environment() {
     fi
     
     echo "💻 环境信息: $ENVIRONMENT ($DISTRO)"
+    echo "📱 会话管理器: $SESSION_MANAGER"
     echo ""
 }
 
@@ -73,6 +82,7 @@ show_main_banner() {
 
     === Nexus Network 一体化管理工具 ===
     支持 Linux 和 Windows WSL 环境
+    智能会话管理 (tmux/screen)
 ** ====================================== **
 *         此脚本仅供免费使用              *
 *         禁止出售或用于盈利              *
@@ -169,38 +179,157 @@ install_system_dependencies() {
     return 0
 }
 
-# 安装screen
-install_screen() {
-    if ! command -v screen &> /dev/null; then
-        echo "📺 正在安装 screen..."
-        
-        PKG_MANAGER=$(get_package_manager)
-        
-        case $PKG_MANAGER in
-            "apt")
-                $SUDO_CMD apt install -y screen
-                ;;
-            "yum")
-                $SUDO_CMD yum install -y screen
-                ;;
-            "dnf")
-                $SUDO_CMD dnf install -y screen
-                ;;
-            "pacman")
-                $SUDO_CMD pacman -S --noconfirm screen
-                ;;
-            *)
-                echo "❌ 无法自动安装screen，请手动安装"
-                return 1
-                ;;
-        esac
-        
-        echo "✅ screen 安装完成！"
+# 安装会话管理器
+install_session_manager() {
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        if ! command -v tmux &> /dev/null; then
+            echo "📺 正在安装 tmux (适用于WSL)..."
+            
+            PKG_MANAGER=$(get_package_manager)
+            
+            case $PKG_MANAGER in
+                "apt")
+                    $SUDO_CMD apt install -y tmux
+                    ;;
+                "yum")
+                    $SUDO_CMD yum install -y tmux
+                    ;;
+                "dnf")
+                    $SUDO_CMD dnf install -y tmux
+                    ;;
+                "pacman")
+                    $SUDO_CMD pacman -S --noconfirm tmux
+                    ;;
+                *)
+                    echo "❌ 无法自动安装tmux，请手动安装"
+                    return 1
+                    ;;
+            esac
+            
+            echo "✅ tmux 安装完成！"
+        else
+            echo "✅ tmux 已安装"
+        fi
     else
-        echo "✅ screen 已安装"
+        if ! command -v screen &> /dev/null; then
+            echo "📺 正在安装 screen (适用于Linux)..."
+            
+            PKG_MANAGER=$(get_package_manager)
+            
+            case $PKG_MANAGER in
+                "apt")
+                    $SUDO_CMD apt install -y screen
+                    ;;
+                "yum")
+                    $SUDO_CMD yum install -y screen
+                    ;;
+                "dnf")
+                    $SUDO_CMD dnf install -y screen
+                    ;;
+                "pacman")
+                    $SUDO_CMD pacman -S --noconfirm screen
+                    ;;
+                *)
+                    echo "❌ 无法自动安装screen，请手动安装"
+                    return 1
+                    ;;
+            esac
+            
+            echo "✅ screen 安装完成！"
+        else
+            echo "✅ screen 已安装"
+        fi
     fi
     
     return 0
+}
+
+# 创建会话（根据环境使用不同的会话管理器）
+create_session() {
+    local session_name="$1"
+    local node_id="$2"
+    local session_index="$3"
+    local total_sessions="$4"
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        # 使用tmux创建会话
+        tmux new-session -d -s "$session_name" bash -c "
+    export PATH=\"\$HOME/.nexus/bin:\$PATH\"
+    echo '=== Nexus 节点运行中 (tmux) ==='
+    echo '节点ID: $node_id'
+    echo '会话名称: $session_name'
+    echo '节点序号: $session_index/$total_sessions'
+    echo '开始时间: \$(date)'
+    echo '内存分配: 4GB (推荐)'
+    echo '环境: $ENVIRONMENT'
+    echo ''
+
+    echo \"\$(date): 启动节点 $node_id\"
+    nexus-network start --node-id \"$node_id\"
+    "
+    else
+        # 使用screen创建会话
+        screen -dmS "$session_name" bash -c "
+    export PATH=\"\$HOME/.nexus/bin:\$PATH\"
+    echo '=== Nexus 节点运行中 (screen) ==='
+    echo '节点ID: $node_id'
+    echo '会话名称: $session_name'
+    echo '节点序号: $session_index/$total_sessions'
+    echo '开始时间: \$(date)'
+    echo '内存分配: 4GB (推荐)'
+    echo '环境: $ENVIRONMENT'
+    echo ''
+
+    echo \"\$(date): 启动节点 $node_id\"
+    nexus-network start --node-id \"$node_id\"
+    "
+    fi
+}
+
+# 列出会话
+list_sessions() {
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        tmux list-sessions 2>/dev/null | grep nexus_ || echo ""
+    else
+        screen -list 2>/dev/null | grep nexus_ || echo ""
+    fi
+}
+
+# 连接到会话
+connect_to_session() {
+    local session_name="$1"
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        echo "🔗 连接到tmux会话 $session_name..."
+        echo "提示: 按 Ctrl+B 然后 D 分离会话"
+        tmux attach-session -t "$session_name"
+    else
+        echo "🔗 连接到screen会话 $session_name..."
+        echo "提示: 按 Ctrl+A 然后 D 分离会话"
+        screen -r "$session_name"
+    fi
+}
+
+# 停止会话
+kill_session() {
+    local session_name="$1"
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        tmux kill-session -t "$session_name" 2>/dev/null
+    else
+        screen -S "$session_name" -X quit 2>/dev/null
+    fi
+}
+
+# 检查会话是否存在
+session_exists() {
+    local session_name="$1"
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        tmux list-sessions 2>/dev/null | grep -q "^$session_name:"
+    else
+        screen -list 2>/dev/null | grep -q "$session_name"
+    fi
 }
 
 # 安装节点功能
@@ -219,8 +348,8 @@ install_nodes() {
     detect_memory
     recommended_nodes=$?
 
-    # 安装screen
-    if ! install_screen; then
+    # 安装会话管理器
+    if ! install_session_manager; then
         return 1
     fi
 
@@ -280,7 +409,7 @@ install_nodes() {
     echo "=== 安装完成 ==="
     echo "nexus-cli 已准备就绪！"
     echo ""
-    read -p "是否要建立 Screen 会话运行节点？(y/n): " create_session
+    read -p "是否要建立 $SESSION_MANAGER 会话运行节点？(y/n): " create_session
 
     if [[ $create_session != "y" && $create_session != "Y" ]]; then
         echo "好的，您可以稍后手动运行节点。"
@@ -354,13 +483,13 @@ install_nodes() {
 
     # 检查现有会话并启动多个节点
     echo ""
-    echo "=== 启动多个节点 ==="
+    echo "=== 启动多个节点 ($SESSION_MANAGER) ==="
 
     # 检查是否有冲突的会话
     conflicting_sessions=()
     for node_id in "${NODE_IDS[@]}"; do
         session_name="nexus_${node_id}"
-        if screen -list 2>/dev/null | grep -q "$session_name"; then
+        if session_exists "$session_name"; then
             conflicting_sessions+=("$session_name")
         fi
     done
@@ -376,7 +505,7 @@ install_nodes() {
         if [[ $choice == "y" || $choice == "Y" ]]; then
             for session in "${conflicting_sessions[@]}"; do
                 echo "🗑️ 终止会话: $session"
-                screen -S "$session" -X quit 2>/dev/null
+                kill_session "$session"
             done
         else
             echo "❌ 操作取消"
@@ -395,23 +524,10 @@ install_nodes() {
         
         echo "📡 启动节点 $((i+1))/${#NODE_IDS[@]}: $node_id"
         
-        # 在screen会话中运行节点
-        screen -dmS "$session_name" bash -c "
-    export PATH=\"\$HOME/.nexus/bin:\$PATH\"
-    echo '=== Nexus 节点运行中 ==='
-    echo '节点ID: $node_id'
-    echo '会话名称: $session_name'
-    echo '节点序号: $((i+1))/${#NODE_IDS[@]}'
-    echo '开始时间: \$(date)'
-    echo '内存分配: 4GB (推荐)'
-    echo '环境: $ENVIRONMENT'
-    echo ''
-
-    echo \"\$(date): 启动节点 $node_id\"
-    nexus-network start --node-id \"$node_id\"
-    "
+        # 创建会话
+        create_session "$session_name" "$node_id" "$((i+1))" "${#NODE_IDS[@]}"
         
-        echo "✅ 节点 $node_id 已在Screen会话中启动！"
+        echo "✅ 节点 $node_id 已在 $SESSION_MANAGER 会话中启动！"
         
         # 添加启动间隔，避免同时启动造成资源冲突
         if [ $((i+1)) -lt ${#NODE_IDS[@]} ]; then
@@ -424,29 +540,52 @@ install_nodes() {
     echo "🎉 所有节点启动完成！"
     echo ""
     echo "📋 节点管理命令："
-    echo "• 查看所有会话: screen -list"
-    echo "• 连接到指定节点: screen -r nexus_<节点ID>"
-    echo "• 分离会话: 在会话中按 Ctrl+A 然后按 D"
-    echo "• 停止指定节点: screen -S nexus_<节点ID> -X quit"
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        echo "• 查看所有会话: tmux list-sessions"
+        echo "• 连接到指定节点: tmux attach-session -t nexus_<节点ID>"
+        echo "• 分离会话: 在会话中按 Ctrl+B 然后按 D"
+        echo "• 停止指定节点: tmux kill-session -t nexus_<节点ID>"
+    else
+        echo "• 查看所有会话: screen -list"
+        echo "• 连接到指定节点: screen -r nexus_<节点ID>"
+        echo "• 分离会话: 在会话中按 Ctrl+A 然后按 D"
+        echo "• 停止指定节点: screen -S nexus_<节点ID> -X quit"
+    fi
     echo "• 使用管理工具: bash yoyom"
     echo ""
 
     # 创建停止所有节点的脚本
-    cat > stop_all_nodes.sh << 'EOF'
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        cat > stop_all_nodes.sh << 'EOF'
 #!/bin/bash
-echo "🛑 停止所有 Nexus 节点..."
+echo "🛑 停止所有 Nexus 节点 (tmux)..."
+for session in $(tmux list-sessions 2>/dev/null | grep nexus_ | cut -d: -f1); do
+    echo "停止会话: $session"
+    tmux kill-session -t "$session" 2>/dev/null
+done
+echo "✅ 所有节点已停止"
+EOF
+    else
+        cat > stop_all_nodes.sh << 'EOF'
+#!/bin/bash
+echo "🛑 停止所有 Nexus 节点 (screen)..."
 for session in $(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}'); do
     echo "停止会话: $session"
     screen -S "$session" -X quit 2>/dev/null
 done
 echo "✅ 所有节点已停止"
 EOF
+    fi
 
     chmod +x stop_all_nodes.sh 2>/dev/null || true
 
     echo "📊 当前运行的节点:"
     for node_id in "${NODE_IDS[@]}"; do
-        echo "  - 节点 $node_id: screen -r nexus_$node_id"
+        if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+            echo "  - 节点 $node_id: tmux attach-session -t nexus_$node_id"
+        else
+            echo "  - 节点 $node_id: screen -r nexus_$node_id"
+        fi
     done
 
     echo ""
@@ -462,22 +601,38 @@ check_nodes_status() {
     echo "📊 检查节点状态..."
     echo ""
     
-    nexus_sessions=$(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}')
+    # 确保环境检测已运行
+    if [[ -z "$SESSION_MANAGER" ]]; then
+        detect_environment >/dev/null 2>&1
+    fi
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        nexus_sessions=$(tmux list-sessions 2>/dev/null | grep nexus_ | cut -d: -f1)
+    else
+        nexus_sessions=$(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}')
+    fi
     
     if [ -z "$nexus_sessions" ]; then
         echo "❌ 没有发现运行中的 Nexus 节点"
         return
     fi
     
-    echo "✅ 运行中的节点:"
+    echo "✅ 运行中的节点 ($SESSION_MANAGER):"
     echo ""
     
     count=1
     for session in $nexus_sessions; do
-        node_id=$(echo "$session" | sed 's/.*nexus_//' | sed 's/\..*$//')
-        echo "  $count. 节点ID: $node_id"
-        echo "     会话名: $session"
-        echo "     连接命令: screen -r $session"
+        if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+            node_id=$(echo "$session" | sed 's/nexus_//')
+            echo "  $count. 节点ID: $node_id"
+            echo "     会话名: $session"
+            echo "     连接命令: tmux attach-session -t $session"
+        else
+            node_id=$(echo "$session" | sed 's/.*nexus_//' | sed 's/\..*$//')
+            echo "  $count. 节点ID: $node_id"
+            echo "     会话名: $session"
+            echo "     连接命令: screen -r $session"
+        fi
         echo ""
         ((count++))
     done
@@ -496,9 +651,9 @@ stop_node() {
     
     session_name="nexus_${node_id}"
     
-    if screen -list 2>/dev/null | grep -q "$session_name"; then
+    if session_exists "$session_name"; then
         echo "🛑 停止节点 $node_id..."
-        screen -S "$session_name" -X quit 2>/dev/null
+        kill_session "$session_name"
         echo "✅ 节点 $node_id 已停止"
     else
         echo "❌ 未找到节点 $node_id 的运行会话"
@@ -509,7 +664,16 @@ stop_node() {
 stop_all_nodes() {
     echo "🛑 停止所有 Nexus 节点..."
     
-    nexus_sessions=$(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}')
+    # 确保环境检测已运行
+    if [[ -z "$SESSION_MANAGER" ]]; then
+        detect_environment >/dev/null 2>&1
+    fi
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        nexus_sessions=$(tmux list-sessions 2>/dev/null | grep nexus_ | cut -d: -f1)
+    else
+        nexus_sessions=$(screen -list 2>/dev/null | grep nexus_ | awk '{print $1}')
+    fi
     
     if [ -z "$nexus_sessions" ]; then
         echo "❌ 没有发现运行中的 Nexus 节点"
@@ -517,9 +681,15 @@ stop_all_nodes() {
     fi
     
     for session in $nexus_sessions; do
-        node_id=$(echo "$session" | sed 's/.*nexus_//' | sed 's/\..*$//')
-        echo "停止节点: $node_id"
-        screen -S "$session" -X quit 2>/dev/null
+        if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+            node_id=$(echo "$session" | sed 's/nexus_//')
+            echo "停止节点: $node_id"
+            tmux kill-session -t "$session" 2>/dev/null
+        else
+            node_id=$(echo "$session" | sed 's/.*nexus_//' | sed 's/\..*$//')
+            echo "停止节点: $node_id"
+            screen -S "$session" -X quit 2>/dev/null
+        fi
     done
     
     echo "✅ 所有节点已停止"
@@ -529,7 +699,18 @@ stop_all_nodes() {
 connect_to_node() {
     check_nodes_status
     
-    if [ "$(screen -list 2>/dev/null | grep nexus_ | wc -l)" -eq 0 ]; then
+    # 确保环境检测已运行
+    if [[ -z "$SESSION_MANAGER" ]]; then
+        detect_environment >/dev/null 2>&1
+    fi
+    
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        session_count=$(tmux list-sessions 2>/dev/null | grep nexus_ | wc -l)
+    else
+        session_count=$(screen -list 2>/dev/null | grep nexus_ | wc -l)
+    fi
+    
+    if [ "$session_count" -eq 0 ]; then
         return
     fi
     
@@ -542,10 +723,8 @@ connect_to_node() {
     
     session_name="nexus_${node_id}"
     
-    if screen -list 2>/dev/null | grep -q "$session_name"; then
-        echo "🔗 连接到节点 $node_id..."
-        echo "提示: 按 Ctrl+A 然后 D 分离会话"
-        screen -r "$session_name"
+    if session_exists "$session_name"; then
+        connect_to_session "$session_name"
     else
         echo "❌ 未找到节点 $node_id 的运行会话"
     fi
@@ -557,7 +736,9 @@ show_system_resources() {
     echo ""
     
     # 检测环境
-    detect_environment
+    if [[ -z "$SESSION_MANAGER" ]]; then
+        detect_environment
+    fi
     
     # 内存使用情况
     if [[ -f /proc/meminfo ]]; then
@@ -599,8 +780,12 @@ show_system_resources() {
     echo ""
     
     # 运行中的节点数量
-    nexus_count=$(screen -list 2>/dev/null | grep nexus_ | wc -l)
-    echo "🚀 运行中的节点: ${nexus_count} 个"
+    if [[ "$SESSION_MANAGER" == "tmux" ]]; then
+        nexus_count=$(tmux list-sessions 2>/dev/null | grep nexus_ | wc -l)
+    else
+        nexus_count=$(screen -list 2>/dev/null | grep nexus_ | wc -l)
+    fi
+    echo "🚀 运行中的节点: ${nexus_count} 个 ($SESSION_MANAGER)"
     
     if [ $nexus_count -gt 0 ]; then
         estimated_memory=$((nexus_count * 4))
@@ -629,6 +814,11 @@ manage_nodes() {
     echo "
     === Nexus 节点管理工具 ===
 "
+    
+    # 检测环境
+    if [[ -z "$SESSION_MANAGER" ]]; then
+        detect_environment
+    fi
     
     while true; do
         show_management_menu
@@ -696,16 +886,16 @@ show_help() {
 📖 === Nexus Network 一体化管理工具帮助 ===
 
 🌐 支持环境:
-  • Linux (Ubuntu/CentOS/Debian/Arch Linux)
-  • Windows WSL (Windows Subsystem for Linux)
+  • Linux (Ubuntu/CentOS/Debian/Arch Linux) - 使用 screen
+  • Windows WSL (Windows Subsystem for Linux) - 使用 tmux
 
 🚀 主要功能:
-  1. 自动检测系统内存并推荐节点数量
-  2. 一键安装 nexus-cli 和相关依赖
-  3. 支持多个节点同时运行
-  4. 完整的节点管理功能
-  5. 实时系统资源监控
-  6. 智能环境检测和适配
+  1. 智能环境检测和会话管理器选择
+  2. 自动检测系统内存并推荐节点数量
+  3. 一键安装 nexus-cli 和相关依赖
+  4. 支持多个节点同时运行
+  5. 完整的节点管理功能
+  6. 实时系统资源监控
 
 📋 使用流程:
   1. 首次使用选择 '安装并启动 Nexus 节点'
@@ -714,10 +904,20 @@ show_help() {
 
 🔧 常用命令:
   • 启动工具: bash yoyom
+  
+  Linux环境 (screen):
   • 查看所有会话: screen -list
   • 连接到节点: screen -r nexus_<节点ID>
   • 分离会话: Ctrl+A 然后 D
   • 停止单个节点: screen -S nexus_<节点ID> -X quit
+  
+  WSL环境 (tmux):
+  • 查看所有会话: tmux list-sessions
+  • 连接到节点: tmux attach-session -t nexus_<节点ID>
+  • 分离会话: Ctrl+B 然后 D
+  • 停止单个节点: tmux kill-session -t nexus_<节点ID>
+  
+  通用:
   • 停止所有节点: bash stop_all_nodes.sh
 
 💾 内存要求:
@@ -732,12 +932,18 @@ show_help() {
   • 节点ID 必须是纯数字
   • 不要超过系统推荐的节点数量
   • SSH 断开后节点会继续运行
-  • WSL用户请确保已安装Linux发行版
+  • WSL用户自动使用tmux，Linux用户使用screen
 
 🔧 WSL环境说明:
   • 在Windows上需要先安装WSL
   • 推荐使用Ubuntu或Debian发行版
   • 确保WSL版本为WSL2
+  • 脚本会自动检测并安装tmux
+
+🐛 故障排除:
+  • 如遇到Windows行结束符错误，运行: sed -i 's/\\r\$//' yoyom
+  • WSL环境推荐使用tmux而非screen
+  • 如果会话无法创建，检查是否有sudo权限
 "
 }
 
