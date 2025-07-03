@@ -285,7 +285,7 @@ install_nodes() {
     echo "• 连接到指定节点: screen -r nexus_<节点ID>"
     echo "• 分离会话: 在会话中按 Ctrl+A 然后按 D"
     echo "• 停止指定节点: screen -S nexus_<节点ID> -X quit"
-    echo "• 使用管理工具: ./yoyom"
+    echo "• 使用管理工具: bash yoyom"
     echo ""
 
     # 创建停止所有节点的脚本
@@ -309,7 +309,7 @@ EOF
     echo ""
     echo "🌐 现在您可以安全地关闭SSH连接，所有节点会继续运行！"
     echo "📝 已创建 stop_all_nodes.sh 脚本用于一键停止所有节点"
-    echo "🛠️ 运行 './yoyom' 进入节点管理界面"
+    echo "🛠️ 运行 'bash yoyom' 进入节点管理界面"
 }
 
 # ===== 节点管理功能 =====

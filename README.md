@@ -37,11 +37,8 @@
 # 下载一体化管理工具
 wget https://raw.githubusercontent.com/mumumusf/Nexus/main/yoyom
 
-# 给执行权限（Linux）
-chmod +x yoyom
-
 # 运行工具
-./yoyom
+bash yoyom
 ```
 
 ## 🎯 使用方式
@@ -49,7 +46,7 @@ chmod +x yoyom
 ### 1. 交互模式（推荐）
 
 ```bash
-./yoyom
+bash yoyom
 ```
 
 显示主菜单：
@@ -67,10 +64,10 @@ chmod +x yoyom
 
 ```bash
 # 直接进入安装模式
-./yoyom --install
+bash yoyom --install
 
 # 直接进入管理模式
-./yoyom --manage
+bash yoyom --manage
 ```
 
 ## 📖 详细使用步骤
@@ -178,7 +175,7 @@ screen -S nexus_7366937 -X quit
 
 #### 重新启动管理工具
 ```bash
-./yoyom
+bash yoyom
 ```
 
 ## 🔄 运行机制
@@ -216,7 +213,7 @@ A: 不可以，工具会自动检测并阻止重复ID
 A: 重新下载最新版本的 yoyom 文件即可
 
 **Q: 工具支持哪些操作模式？**
-A: 支持交互式菜单模式和命令行模式（--install, --manage）
+A: 支持交互式菜单模式和命令行模式（bash yoyom --install, bash yoyom --manage）
 
 ## 📊 内存分配示例
 
@@ -233,7 +230,7 @@ A: 支持交互式菜单模式和命令行模式（--install, --manage）
 ### v4.0.0 (一体化版)
 - ✨ **重大更新**: 将安装和管理功能合并为单个工具
 - ✨ **新增**: 交互式主菜单界面
-- ✨ **新增**: 命令行参数支持（--install, --manage）
+- ✨ **新增**: 命令行参数支持（bash yoyom --install, bash yoyom --manage）
 - ✨ **新增**: 内置帮助系统
 - ✨ **改进**: 更简洁的使用流程
 - ✨ **改进**: 统一的用户界面设计
@@ -263,9 +260,9 @@ A: 支持交互式菜单模式和命令行模式（--install, --manage）
 
 ## 🎯 使用建议
 
-1. **首次使用**: 运行 `./yoyom` 选择"安装并启动 Nexus 节点"
-2. **日常管理**: 运行 `./yoyom` 选择"管理现有节点"
-3. **快速管理**: 使用 `./yoyom --manage` 直接进入管理界面
+1. **首次使用**: 运行 `bash yoyom` 选择"安装并启动 Nexus 节点"
+2. **日常管理**: 运行 `bash yoyom` 选择"管理现有节点"
+3. **快速管理**: 使用 `bash yoyom --manage` 直接进入管理界面
 4. **系统监控**: 定期查看系统资源使用情况
 5. **保持更新**: 定期下载最新版本的工具
 
