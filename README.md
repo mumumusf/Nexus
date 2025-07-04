@@ -5,10 +5,10 @@
 ## 快速部署
 
 ```bash
-# 一键部署（完整功能版本）
+# 一键部署
 git clone https://github.com/mumumusf/Nexus.git
 cd Nexus
-node yoyom.js
+node nexus-node-manager.js
 ```
 
 ## 功能特性

@@ -14,6 +14,7 @@ class NexusNodeManager {
         this.imageName = 'ubuntu:24.04';
         this.minMemoryGB = 5;
         this.nodeInstances = [];
+        this.detailedLogs = false; // 详细日志模式
         
         this.rl = readline.createInterface({
             input: process.stdin,
@@ -175,21 +176,59 @@ class NexusNodeManager {
         console.log(`🚀 正在启动节点 ${nodeId}...`);
         
         try {
-            // 在screen会话中启动节点
-            const command = `screen -dmS ${screenSessionName} bash -c "source ~/.bashrc && nexus-network start --node-id ${nodeId}"`;
+            if (this.detailedLogs) {
+                console.log(`📋 详细启动过程:`);
+                console.log(`   - 节点ID: ${nodeId}`);
+                console.log(`   - Screen会话: ${screenSessionName}`);
+                console.log(`   - 容器: ${this.containerName}`);
+            }
+
+            // 创建日志目录
+            if (this.detailedLogs) console.log(`📁 创建日志目录...`);
+            await this.executeInContainer(`mkdir -p ~/.nexus/logs`);
+            
+            // 在screen会话中启动节点，重定向日志到文件
+            if (this.detailedLogs) console.log(`🔧 启动nexus进程...`);
+            const logFile = `~/.nexus/logs/node-${nodeId}.log`;
+            const command = `screen -dmS ${screenSessionName} bash -c "source ~/.bashrc && nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}"`;
+            
             await this.executeInContainer(command);
             
-            console.log(`✅ 节点 ${nodeId} 在screen会话 ${screenSessionName} 中启动成功`);
+            // 等待一下确保进程启动
+            if (this.detailedLogs) console.log(`⏳ 等待进程启动...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // 检查进程是否启动成功
+            if (this.detailedLogs) console.log(`🔍 检查进程状态...`);
+            try {
+                const { stdout } = await this.executeInContainer(`screen -ls | grep ${screenSessionName}`);
+                if (stdout.includes(screenSessionName)) {
+                    console.log(`✅ 节点 ${nodeId} 在screen会话 ${screenSessionName} 中启动成功`);
+                    if (this.detailedLogs) {
+                        console.log(`📊 启动信息:`);
+                        console.log(`   - 日志文件: ${logFile}`);
+                        console.log(`   - 查看日志: docker exec -it ${this.containerName} bash -c "tail -f ${logFile}"`);
+                    }
+                } else {
+                    throw new Error('Screen会话未找到');
+                }
+            } catch (checkError) {
+                console.log(`⚠️ 无法确认启动状态，但命令已执行`);
+            }
             
             this.nodeInstances.push({
                 nodeId: nodeId,
                 screenSession: screenSessionName,
-                status: 'running'
+                status: 'running',
+                logFile: logFile
             });
             
             return true;
         } catch (error) {
             console.error(`❌ 启动节点 ${nodeId} 失败:`, error.message);
+            if (this.detailedLogs) {
+                console.error(`🔍 错误详情:`, error);
+            }
             return false;
         }
     }
@@ -230,15 +269,46 @@ class NexusNodeManager {
 
         console.log('\n🚀 开始启动节点...');
         
+        let successCount = 0;
+        let failCount = 0;
+        
         for (let i = 0; i < nodeIds.length; i++) {
             const nodeId = nodeIds[i];
             const screenSessionName = `nexus-node-${i + 1}`;
             
-            await this.startNode(nodeId, screenSessionName);
+            console.log(`\n📝 正在启动第 ${i + 1}/${nodeIds.length} 个节点...`);
+            const success = await this.startNode(nodeId, screenSessionName);
+            
+            if (success) {
+                successCount++;
+            } else {
+                failCount++;
+            }
             
             // 添加延迟避免同时启动造成资源竞争
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (i < nodeIds.length - 1) {
+                if (this.detailedLogs) console.log(`⏳ 等待2秒后启动下一个节点...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
         }
+
+        // 启动完成总结
+        console.log('\n' + '='.repeat(50));
+        console.log('🎉 节点启动完成！');
+        console.log('='.repeat(50));
+        console.log(`✅ 成功启动: ${successCount} 个节点`);
+        if (failCount > 0) {
+            console.log(`❌ 启动失败: ${failCount} 个节点`);
+        }
+        console.log(`📊 总计节点: ${this.nodeInstances.length} 个`);
+        console.log('\n💡 提示:');
+        console.log('   - 选择菜单选项 2 查看节点状态');
+        console.log('   - 选择菜单选项 3 查看节点日志');
+        console.log('   - 输入 v 切换详细日志模式');
+        console.log('='.repeat(50));
+        
+        // 等待用户查看信息
+        await this.getUserInput('\n按回车键返回主菜单...');
     }
 
     // 显示运行状态
@@ -256,11 +326,37 @@ class NexusNodeManager {
             const activeSessions = stdout.split('\n').filter(line => line.includes('nexus-node'));
 
             console.log(`   总计节点: ${this.nodeInstances.length}`);
+            console.log('-'.repeat(80));
             
             for (const node of this.nodeInstances) {
                 const isActive = activeSessions.some(session => session.includes(node.screenSession));
                 const status = isActive ? '🟢 运行中' : '🔴 已停止';
-                console.log(`   节点ID: ${node.nodeId} | Screen: ${node.screenSession} | 状态: ${status}`);
+                console.log(`   节点ID: ${node.nodeId}`);
+                console.log(`   Screen会话: ${node.screenSession}`);
+                console.log(`   状态: ${status}`);
+                if (node.logFile) {
+                    console.log(`   日志文件: ${node.logFile}`);
+                    
+                    // 显示最近的日志（如果开启详细模式）
+                    if (this.detailedLogs) {
+                        try {
+                            const { stdout: logContent } = await this.executeInContainer(`tail -3 ${node.logFile} 2>/dev/null || echo "暂无日志"`);
+                            const logs = logContent.trim();
+                            if (logs && logs !== "暂无日志") {
+                                console.log(`   最近日志: ${logs.split('\n')[0]}...`);
+                            }
+                        } catch (logError) {
+                            // 忽略日志读取错误
+                        }
+                    }
+                }
+                console.log('-'.repeat(80));
+            }
+            
+            if (this.nodeInstances.length > 0) {
+                console.log('\n💡 提示:');
+                console.log('   - 选择菜单选项 3 查看详细日志');
+                console.log('   - 输入 v 开启详细日志模式显示更多信息');
             }
         } catch (error) {
             console.error('获取状态失败:', error.message);
@@ -284,6 +380,110 @@ class NexusNodeManager {
         console.log('✅ 所有节点已停止');
     }
 
+    // 查看节点日志
+    async viewNodeLogs() {
+        console.log('\n📋 节点日志查看');
+        
+        if (this.nodeInstances.length === 0) {
+            console.log('   当前没有运行的节点');
+            return;
+        }
+
+        console.log('\n选择要查看日志的节点:');
+        for (let i = 0; i < this.nodeInstances.length; i++) {
+            const node = this.nodeInstances[i];
+            console.log(`   ${i + 1}. 节点 ${node.nodeId} (${node.screenSession})`);
+        }
+        console.log(`   ${this.nodeInstances.length + 1}. 查看所有节点日志`);
+        console.log(`   0. 返回主菜单`);
+
+        const choice = await this.getUserInput('\n请选择: ');
+        const nodeIndex = parseInt(choice) - 1;
+
+        if (choice === '0') {
+            return;
+        } else if (parseInt(choice) === this.nodeInstances.length + 1) {
+            // 查看所有节点日志
+            console.log('\n📊 所有节点日志:');
+            for (const node of this.nodeInstances) {
+                await this.showNodeLog(node, 10);
+            }
+        } else if (nodeIndex >= 0 && nodeIndex < this.nodeInstances.length) {
+            const selectedNode = this.nodeInstances[nodeIndex];
+            await this.showDetailedNodeLog(selectedNode);
+        } else {
+            console.log('❌ 无效选择');
+        }
+    }
+
+    // 显示节点详细日志
+    async showDetailedNodeLog(node) {
+        console.log(`\n📋 节点 ${node.nodeId} 详细日志:`);
+        console.log(`Screen会话: ${node.screenSession}`);
+        console.log(`日志文件: ${node.logFile}`);
+        console.log('=' .repeat(60));
+
+        try {
+            // 显示最近50行日志
+            const { stdout } = await this.executeInContainer(`tail -50 ${node.logFile} 2>/dev/null || echo "日志文件不存在或为空"`);
+            if (stdout.trim()) {
+                console.log(stdout);
+            } else {
+                console.log('📝 暂无日志内容');
+            }
+        } catch (error) {
+            console.log('❌ 读取日志失败:', error.message);
+        }
+
+        console.log('=' .repeat(60));
+        console.log('\n📖 实时日志选项:');
+        console.log('1. 查看实时日志 (按Ctrl+C退出)');
+        console.log('2. 查看完整日志');
+        console.log('3. 返回');
+
+        const choice = await this.getUserInput('请选择: ');
+        
+        if (choice === '1') {
+            console.log(`\n🔄 实时查看节点 ${node.nodeId} 日志 (按Ctrl+C退出):`);
+            console.log(`手动命令: docker exec -it ${this.containerName} bash -c "tail -f ${node.logFile}"`);
+            await this.getUserInput('\n按回车键返回菜单...');
+        } else if (choice === '2') {
+            try {
+                const { stdout } = await this.executeInContainer(`cat ${node.logFile} 2>/dev/null || echo "日志文件不存在"`);
+                console.log('\n📄 完整日志:');
+                console.log('=' .repeat(60));
+                console.log(stdout);
+                console.log('=' .repeat(60));
+            } catch (error) {
+                console.log('❌ 读取完整日志失败:', error.message);
+            }
+            await this.getUserInput('\n按回车键返回...');
+        }
+    }
+
+    // 显示节点简要日志
+    async showNodeLog(node, lines = 5) {
+        console.log(`\n📋 节点 ${node.nodeId} (最近${lines}行):`);
+        try {
+            const { stdout } = await this.executeInContainer(`tail -${lines} ${node.logFile} 2>/dev/null || echo "暂无日志"`);
+            console.log(stdout.trim() || '📝 暂无日志内容');
+        } catch (error) {
+            console.log('❌ 读取日志失败');
+        }
+        console.log('-'.repeat(40));
+    }
+
+    // 切换详细日志模式
+    toggleDetailedLogs() {
+        this.detailedLogs = !this.detailedLogs;
+        console.log(`\n📊 详细日志模式: ${this.detailedLogs ? '✅ 已开启' : '❌ 已关闭'}`);
+        if (this.detailedLogs) {
+            console.log('现在会显示详细的操作过程和错误信息');
+        } else {
+            console.log('现在只显示简要的操作结果');
+        }
+    }
+
     // 显示管理菜单
     async showMenu() {
         console.log('\n' + '='.repeat(50));
@@ -291,14 +491,17 @@ class NexusNodeManager {
         console.log('='.repeat(50));
         console.log('1. 启动多个节点');
         console.log('2. 查看节点状态');
-        console.log('3. 停止所有节点');
-        console.log('4. 进入容器命令行');
-        console.log('5. 退出');
+        console.log('3. 查看节点日志');
+        console.log('4. 停止所有节点');
+        console.log('5. 进入容器命令行');
+        console.log('6. 退出');
+        console.log('='.repeat(50));
+        console.log(`📊 详细日志: ${this.detailedLogs ? '✅ 开启' : '❌ 关闭'} (输入 v 切换)`);
         console.log('='.repeat(50));
         
-        const choice = await this.getUserInput('请选择操作 (1-5): ');
+        const choice = await this.getUserInput('请选择操作 (1-6, v): ');
         
-        switch (choice) {
+        switch (choice.toLowerCase()) {
             case '1':
                 await this.startMultipleNodes();
                 break;
@@ -306,19 +509,25 @@ class NexusNodeManager {
                 await this.showStatus();
                 break;
             case '3':
-                await this.stopAllNodes();
+                await this.viewNodeLogs();
                 break;
             case '4':
+                await this.stopAllNodes();
+                break;
+            case '5':
                 console.log(`\n要进入容器命令行，请在新终端中运行:`);
                 console.log(`docker exec -it ${this.containerName} bash`);
                 console.log(`在容器中查看screen会话: screen -ls`);
                 console.log(`连接到特定会话: screen -r <session-name>`);
                 console.log(`断开screen会话但保持运行: Ctrl+A 然后按 D`);
                 break;
-            case '5':
+            case '6':
                 console.log('👋 感谢使用Nexus节点管理器！');
                 this.rl.close();
                 return false;
+            case 'v':
+                this.toggleDetailedLogs();
+                break;
             default:
                 console.log('❌ 无效选择');
         }
