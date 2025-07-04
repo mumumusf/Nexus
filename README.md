@@ -96,8 +96,9 @@
 5. **查看节点状态** - 查看所有Docker容器的状态
 6. **查看节点日志** - 查看每个节点的详细运行日志
 7. **重启nexus节点** - 重启所有运行中的nexus节点
-8. **停止所有节点** - 停止并删除所有nexus容器
-9. **退出** - 退出程序
+8. **清理冲突容器** - 清理所有nexus相关容器，解决名称冲突
+9. **停止所有节点** - 停止并删除所有nexus容器
+0. **退出** - 退出程序
 
 ### 部署流程
 
@@ -317,6 +318,33 @@ docker exec -it container-name screen -r session-name
 docker exec container-name screen -dmS nexus-test bash -c "echo 'test'; sleep 10"
 ```
 
+### 容器名称冲突问题
+如果遇到容器名称冲突错误（如 `Conflict. The container name "/nexus-node-1" is already in use`），有以下解决方案：
+
+**自动解决（推荐）**：
+- 使用脚本的"清理冲突容器"功能（选项8）
+- 脚本会自动检测并询问是否删除现有容器
+
+**手动解决**：
+```bash
+# 查看所有nexus容器
+docker ps -a --filter "name=nexus"
+
+# 停止特定容器
+docker stop nexus-node-1
+
+# 删除特定容器
+docker rm nexus-node-1
+
+# 或者一键清理所有nexus容器
+docker stop $(docker ps -q --filter "name=nexus")
+docker rm $(docker ps -aq --filter "name=nexus")
+```
+
+**预防措施**：
+- 部署新节点前先使用"清理冲突容器"功能
+- 定期清理不需要的容器
+
 ## 命令行操作
 
 如果需要手动操作容器，可以使用以下命令：
@@ -462,6 +490,8 @@ npm start
 - ✅ 改进nexus启动流程，增加进程状态检查
 - ✅ 单独安装screen确保后台运行可用
 - ✅ 添加screen安装验证和故障排除
+- ✅ 添加容器名称冲突自动检测和处理
+- ✅ 新增"清理冲突容器"功能
 - ✅ 添加详细的故障排除指南
 
 ### v1.0.0

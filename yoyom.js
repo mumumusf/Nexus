@@ -226,24 +226,69 @@ class NexusMultiRunner {
     async createContainer(containerName, nodeId) {
         console.log(`🚀 创建容器: ${containerName}`);
         
-        // 获取用户主目录
-        const homeDir = process.env.HOME || process.env.USERPROFILE || '/root';
-        
-        const createCommand = `docker run -d --name ${containerName} \
-            -m 3g --cpus="1" \
-            -e NODE_ID=${nodeId} \
-            -v ${homeDir}:/workspace \
-            --restart unless-stopped \
-            ubuntu:24.04 \
-            tail -f /dev/null`;
-        
         try {
+            // 1. 检查容器是否已存在
+            console.log('🔍 检查容器是否已存在...');
+            try {
+                const existingContainer = await this.execCommand(`docker ps -aq --filter "name=${containerName}"`);
+                if (existingContainer.trim()) {
+                    console.log(`⚠️ 发现已存在的容器: ${containerName}`);
+                    
+                    // 询问用户是否要删除现有容器
+                    const deleteExisting = await this.getUserInput('是否删除现有容器并重新创建? (y/n): ');
+                    if (deleteExisting.toLowerCase() === 'y') {
+                        console.log('🗑️ 删除现有容器...');
+                        
+                        // 先停止容器（如果正在运行）
+                        try {
+                            await this.execCommand(`docker stop ${containerName}`);
+                            console.log('🛑 容器已停止');
+                        } catch (err) {
+                            console.log('ℹ️ 容器可能已经停止');
+                        }
+                        
+                        // 删除容器
+                        await this.execCommand(`docker rm ${containerName}`);
+                        console.log('✅ 现有容器已删除');
+                    } else {
+                        console.log('❌ 用户选择不删除现有容器，跳过创建');
+                        return false;
+                    }
+                }
+            } catch (err) {
+                console.log('ℹ️ 容器不存在，继续创建');
+            }
+            
+            // 2. 创建新容器
+            console.log('🚀 开始创建新容器...');
+            
+            // 获取用户主目录
+            const homeDir = process.env.HOME || process.env.USERPROFILE || '/root';
+            
+            const createCommand = `docker run -d --name ${containerName} \
+                -m 3g --cpus="1" \
+                -e NODE_ID=${nodeId} \
+                -v ${homeDir}:/workspace \
+                --restart unless-stopped \
+                ubuntu:24.04 \
+                tail -f /dev/null`;
+            
             await this.execCommand(createCommand);
             console.log(`✅ 容器 ${containerName} 创建成功`);
             console.log(`📁 主机目录 ${homeDir} 已挂载到容器的 /workspace`);
             return true;
+            
         } catch (error) {
             console.error(`❌ 容器 ${containerName} 创建失败:`, error.message);
+            
+            // 提供额外的帮助信息
+            if (error.message.includes('Conflict')) {
+                console.log('💡 解决方案：');
+                console.log(`   1. 手动删除容器: docker rm -f ${containerName}`);
+                console.log(`   2. 查看所有容器: docker ps -a`);
+                console.log(`   3. 重新运行脚本`);
+            }
+            
             return false;
         }
     }
@@ -426,11 +471,12 @@ class NexusMultiRunner {
         console.log('5. 查看节点状态');
         console.log('6. 查看节点日志');
         console.log('7. 重启nexus节点');
-        console.log('8. 停止所有节点');
-        console.log('9. 退出');
+        console.log('8. 清理冲突容器');
+        console.log('9. 停止所有节点');
+        console.log('0. 退出');
         console.log('====================');
         
-        const choice = await this.getUserInput('请选择操作 (1-9): ');
+        const choice = await this.getUserInput('请选择操作 (0-9): ');
         
         switch (choice) {
             case '1':
@@ -455,9 +501,12 @@ class NexusMultiRunner {
                 await this.restartNexusNodes();
                 break;
             case '8':
-                await this.stopAllNodes();
+                await this.cleanupConflictContainers();
                 break;
             case '9':
+                await this.stopAllNodes();
+                break;
+            case '0':
                 this.rl.close();
                 process.exit(0);
                 break;
@@ -602,6 +651,73 @@ class NexusMultiRunner {
             
         } catch (error) {
             console.error('❌ 重启节点失败:', error.message);
+        }
+    }
+
+    // 清理冲突容器
+    async cleanupConflictContainers() {
+        console.log('\n🧹 清理冲突容器...');
+        
+        try {
+            // 查看所有nexus相关容器
+            console.log('🔍 查找nexus相关容器...');
+            const allContainers = await this.execCommand('docker ps -a --format "{{.Names}}\t{{.Status}}" --filter "name=nexus"');
+            
+            if (!allContainers.trim()) {
+                console.log('✅ 没有找到nexus相关容器');
+                return;
+            }
+            
+            console.log('📋 发现的nexus容器:');
+            console.log(allContainers);
+            
+            const cleanup = await this.getUserInput('\n是否清理所有nexus相关容器? (y/n): ');
+            if (cleanup.toLowerCase() !== 'y') {
+                console.log('❌ 用户取消清理操作');
+                return;
+            }
+            
+            console.log('🧹 开始清理容器...');
+            
+            // 停止所有nexus容器（包括nexus-node和nexus-ubuntu24等）
+            console.log('🛑 停止所有nexus容器...');
+            try {
+                const stopCommand = 'docker stop $(docker ps -q --filter "name=nexus") 2>/dev/null';
+                const stopResult = await this.execCommand(stopCommand);
+                if (stopResult.trim()) {
+                    console.log('✅ 容器已停止');
+                } else {
+                    console.log('ℹ️ 没有运行中的nexus容器');
+                }
+            } catch (err) {
+                console.log('ℹ️ 停止容器时出现问题，继续删除操作');
+            }
+            
+            // 删除所有nexus容器
+            console.log('🗑️ 删除所有nexus容器...');
+            try {
+                const removeCommand = 'docker rm $(docker ps -aq --filter "name=nexus") 2>/dev/null';
+                const removeResult = await this.execCommand(removeCommand);
+                if (removeResult.trim()) {
+                    console.log('✅ 容器已删除');
+                } else {
+                    console.log('ℹ️ 没有需要删除的nexus容器');
+                }
+            } catch (err) {
+                console.log('ℹ️ 删除容器时出现问题，可能已经删除');
+            }
+            
+            // 清空内存中的容器记录
+            this.containers = [];
+            
+            console.log('✅ 容器清理完成！');
+            console.log('💡 现在可以重新创建nexus节点了');
+            
+        } catch (error) {
+            console.error('❌ 清理容器失败:', error.message);
+            console.log('💡 你可以手动执行以下命令:');
+            console.log('   docker stop $(docker ps -q --filter "name=nexus")');
+            console.log('   docker rm $(docker ps -aq --filter "name=nexus")');
         }
     }
 
