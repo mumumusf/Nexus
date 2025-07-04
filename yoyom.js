@@ -336,26 +336,12 @@ class NexusMultiRunner {
             console.log('\n📦 步骤2: 安装基础系统工具...');
             await this.execInContainer(containerName, 'apt install -y curl wget git build-essential libssl-dev', this.verboseMode);
             
-            console.log('\n📺 步骤3: 安装screen...');
-            await this.execInContainer(containerName, 'apt install -y screen', this.verboseMode);
-            
-            console.log('\n🔍 步骤4: 验证screen安装...');
-            try {
-                const screenVersion = await this.execInContainer(containerName, 'screen --version', this.verboseMode);
-                console.log('✅ Screen版本:', screenVersion.trim());
-            } catch (err) {
-                console.log('⚠️ 无法验证screen版本，但继续安装过程');
-                if (this.verboseMode) {
-                    console.log('   错误详情:', err.message);
-                }
-            }
-            
-            console.log('\n⬇️ 步骤5: 下载并安装nexus CLI...');
+            console.log('\n⬇️ 步骤3: 下载并安装nexus CLI...');
             console.log('   这个步骤可能需要较长时间，请耐心等待...');
             // 使用非交互模式安装，自动回答y
             await this.execInContainer(containerName, 'echo "y" | curl -L https://cli.nexus.xyz | sh', this.verboseMode);
             
-            console.log('\n🔍 步骤6: 验证nexus CLI安装...');
+            console.log('\n🔍 步骤4: 验证nexus CLI安装...');
             try {
                 const nexusPath = await this.execInContainer(containerName, 'ls -la ~/.nexus/bin/ 2>/dev/null || echo "nexus未安装"', this.verboseMode);
                 console.log('✅ Nexus CLI文件列表:');
@@ -426,18 +412,18 @@ class NexusMultiRunner {
                 }
             }
             
-            // 5. 使用screen在后台运行nexus，并重定向输出到日志文件
+            // 5. 直接在容器中启动nexus节点（后台运行）
             console.log('\n🚀 步骤5: 启动nexus节点...');
             const logFile = `~/.nexus/logs/nexus-${nodeId}.log`;
             
-            // 分步执行，避免复杂的引号嵌套问题
+            // 创建启动日志
             console.log('📝 创建启动日志...');
             await this.execInContainer(containerName, `echo "启动nexus节点: ${nodeId} - $(date)" > ${logFile}`, this.verboseMode);
             
-            // 使用简化的screen命令启动nexus
-            console.log('🎬 启动screen会话...');
-            const screenCommand = `screen -dmS nexus-${nodeId} bash -c "~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 | tee -a ${logFile}; echo 'nexus进程退出，退出码: '\$? >> ${logFile}"`;
-            await this.execInContainer(containerName, screenCommand, this.verboseMode);
+            // 直接启动nexus（使用nohup在后台运行）
+            console.log('🎯 直接启动nexus进程...');
+            const startCommand = `nohup ~/.nexus/bin/nexus-network start --node-id ${nodeId} >> ${logFile} 2>&1 &`;
+            await this.execInContainer(containerName, startCommand, this.verboseMode);
             
             // 6. 等待一下，然后检查进程是否启动
             console.log('\n⏳ 步骤6: 等待进程启动...');
@@ -461,14 +447,21 @@ class NexusMultiRunner {
                 }
             }
             
-            // 8. 检查screen会话
-            console.log('\n📺 步骤8: 检查screen会话...');
+            // 8. 检查进程状态
+            console.log('\n🔍 步骤8: 再次检查nexus进程状态...');
             try {
-                const screenSessions = await this.execInContainer(containerName, 'screen -ls', this.verboseMode);
-                console.log('✅ Screen会话状态:');
-                console.log('   ' + screenSessions.trim().replace(/\n/g, '\n   '));
+                const processes = await this.execInContainer(containerName, 'ps aux | grep nexus-network | grep -v grep', this.verboseMode);
+                if (processes.trim()) {
+                    console.log('✅ Nexus进程运行正常');
+                    if (this.verboseMode) {
+                        console.log('进程详情:', processes.trim());
+                    }
+                } else {
+                    console.log('⚠️ 未找到nexus-network进程，可能启动失败');
+                    console.log('💡 建议查看日志文件排查问题');
+                }
             } catch (err) {
-                console.log('⚠️ 无法检查screen会话');
+                console.log('⚠️ 无法检查nexus进程');
                 if (this.verboseMode) {
                     console.log('   错误详情:', err.message);
                 }
@@ -476,8 +469,9 @@ class NexusMultiRunner {
             
             console.log(`\n✅ ====== 容器 ${containerName} 中nexus节点启动完成！ ======`);
             console.log(`📄 日志文件位置: ~/.nexus/logs/nexus-${nodeId}.log`);
-            console.log(`📺 Screen会话名称: nexus-${nodeId}`);
+            console.log(`🐳 容器名称: ${containerName}`);
             console.log('💡 使用菜单选项6可以查看详细日志');
+            console.log('🔍 可以使用 docker logs ' + containerName + ' 查看容器日志');
             
             return true;
         } catch (error) {
@@ -513,13 +507,18 @@ class NexusMultiRunner {
                 console.log('无法获取进程信息:', err.message);
             }
             
-            // 3. 查看screen会话列表
-            console.log('\n--- Screen会话列表 ---');
+            // 3. 查看nexus进程状态
+            console.log('\n--- Nexus进程状态 ---');
             try {
-                const screenList = await this.execInContainer(containerName, 'screen -ls');
-                console.log(screenList || '暂无screen会话');
+                const nexusProcess = await this.execInContainer(containerName, 'ps aux | grep nexus-network | grep -v grep');
+                if (nexusProcess.trim()) {
+                    console.log('Nexus进程运行中:');
+                    console.log(nexusProcess);
+                } else {
+                    console.log('未找到nexus-network进程');
+                }
             } catch (err) {
-                console.log('无法获取screen会话:', err.message);
+                console.log('无法获取nexus进程状态:', err.message);
             }
             
             // 4. 查看nexus相关文件
@@ -739,7 +738,6 @@ class NexusMultiRunner {
                     console.log('🛑 停止nexus进程...');
                     try {
                         await this.execInContainer(name, 'pkill -f nexus-network');
-                        await this.execInContainer(name, 'screen -wipe'); // 清理screen会话
                     } catch (err) {
                         console.log('⚠️ 停止进程时出现问题:', err.message);
                     }

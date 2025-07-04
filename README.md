@@ -10,6 +10,7 @@
 - 🎯 **多节点部署** - 支持同时运行多个nexus节点
 - 📋 **日志查看** - 实时查看每个节点的运行日志
 - 📝 **详细日志模式** - 可切换的详细日志输出，便于故障排除和学习
+- 🚀 **直接进程管理** - 无需screen，直接在容器中运行，更稳定可靠
 - 🛑 **一键停止** - 快速停止所有节点
 
 ## 系统要求
@@ -154,28 +155,18 @@ v. **切换详细日志模式** - 开启/关闭安装和运行过程的详细日
    # 安装基础工具
    apt install -y curl wget git build-essential libssl-dev
    
-   # 安装screen（重要：用于后台运行）
-   apt install -y screen
-   
    # 安装nexus CLI（会提示确认，输入y）
    curl -L https://cli.nexus.xyz | sh
    # 或者非交互模式：echo "y" | curl -L https://cli.nexus.xyz | sh
    
-   # 使用screen后台运行nexus（方法1：后台运行）
-   screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id"
+   # 直接在容器中启动nexus节点（后台运行）
+   nohup ~/.nexus/bin/nexus-network start --node-id your-node-id > ~/.nexus/logs/nexus.log 2>&1 &
    
-   # 或者方法2：前台运行（可以直接看到输出）
-   screen -S nexus
-   ~/.nexus/bin/nexus-network start --node-id your-node-id
-   # 按 Ctrl+A 然后 D 可以脱离screen会话
+   # 查看nexus进程状态
+   ps aux | grep nexus-network
    
-   # 查看screen会话
-   screen -ls
-   
-   # 连接到nexus会话
-   screen -r nexus-your-node-id
-   # 或者连接到名为nexus的会话
-   screen -r nexus
+   # 查看nexus日志
+   tail -f ~/.nexus/logs/nexus.log
    ```
 
 ### 经过验证的手动流程
@@ -196,20 +187,19 @@ apt update && apt install -y \
 curl -L https://cli.nexus.xyz | sh
 # 当提示 "Do you want to install Nexus CLI? (y/N)" 时，输入 y
 
-# 4. 启动nexus节点
-screen -S nexus
-~/.nexus/bin/nexus-network start --node-id 6520503
-# 按 Ctrl+A 然后 D 脱离screen会话
+# 4. 启动nexus节点（后台运行）
+nohup ~/.nexus/bin/nexus-network start --node-id 6520503 > ~/.nexus/logs/nexus.log 2>&1 &
 
 # 5. 验证运行状态
-screen -ls  # 查看screen会话
-ps aux | grep nexus  # 查看nexus进程
+ps aux | grep nexus-network  # 查看nexus进程
+tail -f ~/.nexus/logs/nexus.log  # 查看实时日志
 ```
 
 **重要提示**：
 - Node ID可以是纯数字（如：`6520503`）或字母数字组合
 - 安装Nexus CLI时需要手动确认，输入`y`
-- 使用screen确保节点在后台持续运行
+- 使用nohup确保节点在后台持续运行
+- Docker容器本身就提供了进程隔离，无需额外的screen管理
 
 ### 节点命名规则
 
@@ -229,7 +219,7 @@ ps aux | grep nexus  # 查看nexus进程
 - **CPU限制**: 1核心
 - **重启策略**: 除非手动停止
 - **挂载目录**: 主机目录挂载到容器的/workspace
-- **基础环境**: curl, wget, git, build-essential, libssl-dev, screen (单独安装确保可用)
+- **基础环境**: curl, wget, git, build-essential, libssl-dev
 
 ## 常见问题
 
@@ -363,28 +353,23 @@ apt install procps coreutils
 - 重新启动nexus节点
 - 保持容器运行状态
 
-### Screen相关问题
-如果screen命令失败，通常是因为screen未正确安装：
+### Nexus进程管理
+
+Nexus节点直接在Docker容器中运行，无需额外的进程管理工具：
 
 ```bash
-# 检查screen是否安装
-docker exec container-name which screen
+# 查看nexus进程
+docker exec container-name ps aux | grep nexus-network
 
-# 如果未安装，手动安装
-docker exec container-name apt update
-docker exec container-name apt install -y screen
+# 查看nexus日志
+docker exec container-name tail -f ~/.nexus/logs/nexus-*.log
 
-# 验证安装
-docker exec container-name screen --version
+# 重启nexus进程
+docker exec container-name pkill -f nexus-network
+docker exec container-name nohup ~/.nexus/bin/nexus-network start --node-id your-node-id > ~/.nexus/logs/nexus.log 2>&1 &
 
-# 查看现有screen会话
-docker exec container-name screen -ls
-
-# 连接到特定会话
-docker exec -it container-name screen -r session-name
-
-# 创建新的后台会话
-docker exec container-name screen -dmS nexus-test bash -c "echo 'test'; sleep 10"
+# 查看容器日志
+docker logs container-name
 ```
 
 ### Node ID格式错误
@@ -434,14 +419,17 @@ unexpected EOF while looking for matching `''
 # 进入容器
 docker exec -it nexus-node-1 bash
 
-# 创建日志文件
-echo "启动nexus节点: your-node-id - $(date)" > ~/.nexus/logs/nexus-your-node-id.log
+# 创建日志目录
+mkdir -p ~/.nexus/logs
 
-# 启动screen会话
-screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id 2>&1 | tee -a ~/.nexus/logs/nexus-your-node-id.log"
+# 直接启动nexus节点（后台运行）
+nohup ~/.nexus/bin/nexus-network start --node-id your-node-id > ~/.nexus/logs/nexus-your-node-id.log 2>&1 &
 
-# 检查会话状态
-screen -ls
+# 检查进程状态
+ps aux | grep nexus-network
+
+# 查看实时日志
+tail -f ~/.nexus/logs/nexus-your-node-id.log
 ```
 
 ### 容器名称冲突问题
@@ -485,14 +473,14 @@ docker exec -it nexus-node-1 bash
 # 进入交互式容器
 docker exec -it nexus-ubuntu24 bash
 
-# 查看screen会话
-screen -ls
-
-# 连接到nexus会话
-screen -r nexus-your-node-id-1
+# 查看nexus进程
+ps aux | grep nexus-network
 
 # 查看nexus日志
 tail -f ~/.nexus/logs/nexus.log
+
+# 停止nexus进程
+pkill -f nexus-network
 
 # 手动创建容器并挂载目录
 docker run -it --name my-nexus -v $HOME:/workspace ubuntu:24.04 bash
@@ -501,24 +489,21 @@ docker run -it --name my-nexus -v $HOME:/workspace ubuntu:24.04 bash
 apt update
 apt install -y curl wget git build-essential libssl-dev
 
-# 安装screen（后台运行必需）
-apt install -y screen
-
-# 验证screen安装
-screen --version
-
 # 安装nexus CLI（会提示确认，输入y）
 curl -L https://cli.nexus.xyz | sh
 # 或者非交互模式：echo "y" | curl -L https://cli.nexus.xyz | sh
 
-# 使用screen后台启动nexus节点
-screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id 2>&1 | tee ~/.nexus/logs/nexus.log"
+# 创建日志目录
+mkdir -p ~/.nexus/logs
 
-# 查看screen会话
-screen -ls
+# 直接启动nexus节点（后台运行）
+nohup ~/.nexus/bin/nexus-network start --node-id your-node-id > ~/.nexus/logs/nexus.log 2>&1 &
 
-# 连接到nexus会话
-screen -r nexus-your-node-id
+# 查看nexus进程
+ps aux | grep nexus-network
+
+# 查看实时日志
+tail -f ~/.nexus/logs/nexus.log
 ```
 
 ## 安全提示
@@ -635,7 +620,7 @@ npm start
 ## 版本信息
 
 - 项目名称: Yoyom
-- 版本: 1.0.4
+- 版本: 1.1.0
 - 推荐Node.js版本: 22.13.1
 - 推荐npm版本: 10.9.2
 - 支持的Nexus版本: 最新版本
@@ -643,7 +628,16 @@ npm start
 
 ## 更新日志
 
-### v1.0.4 (最新)
+### v1.1.0 (最新)
+- 🚀 **重大改进**：完全移除screen依赖，直接在容器中运行nexus节点
+- 🔧 **简化架构**：使用nohup代替screen，减少复杂性和故障点
+- ✅ 更稳定的进程管理：Docker容器本身提供进程隔离
+- ✅ 更简单的日志管理：直接使用Docker日志系统
+- ✅ 减少安装依赖：不再需要安装和配置screen
+- 🐞 **修复**：彻底解决screen相关的所有问题
+- 📚 **文档**：更新所有相关文档和使用说明
+
+### v1.0.4
 - 🐛 **重要修复**：修复screen启动命令中的shell引号嵌套问题
 - 🔧 **优化**：简化nexus启动流程，分解复杂命令为多个简单步骤
 - ✅ 解决了 `unexpected EOF while looking for matching` 错误
