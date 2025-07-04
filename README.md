@@ -415,6 +415,35 @@ error: invalid value 'xxx-1' for '--node-id <NODE_ID>': invalid digit found in s
 4. 尝试重启节点（选项7）
 5. 如果问题持续，删除容器重新部署
 
+### Shell命令解析错误
+
+**问题**：启动nexus时出现引号嵌套错误
+```
+unexpected EOF while looking for matching `''
+```
+
+**解决方案**：
+1. 这是shell命令中引号嵌套导致的问题，v1.0.4已完全修复
+2. 如果仍然遇到此问题：
+   - 确保使用最新版本的脚本（v1.0.4+）
+   - 重新运行部署流程
+   - 开启详细日志模式查看具体命令
+
+**手动启动方法**（如果自动启动失败）：
+```bash
+# 进入容器
+docker exec -it nexus-node-1 bash
+
+# 创建日志文件
+echo "启动nexus节点: your-node-id - $(date)" > ~/.nexus/logs/nexus-your-node-id.log
+
+# 启动screen会话
+screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id 2>&1 | tee -a ~/.nexus/logs/nexus-your-node-id.log"
+
+# 检查会话状态
+screen -ls
+```
+
 ### 容器名称冲突问题
 如果遇到容器名称冲突错误（如 `Conflict. The container name "/nexus-node-1" is already in use`），有以下解决方案：
 
@@ -606,7 +635,7 @@ npm start
 ## 版本信息
 
 - 项目名称: Yoyom
-- 版本: 1.0.3
+- 版本: 1.0.4
 - 推荐Node.js版本: 22.13.1
 - 推荐npm版本: 10.9.2
 - 支持的Nexus版本: 最新版本
@@ -614,7 +643,14 @@ npm start
 
 ## 更新日志
 
-### v1.0.3 (最新)
+### v1.0.4 (最新)
+- 🐛 **重要修复**：修复screen启动命令中的shell引号嵌套问题
+- 🔧 **优化**：简化nexus启动流程，分解复杂命令为多个简单步骤
+- ✅ 解决了 `unexpected EOF while looking for matching` 错误
+- ✅ 提高了nexus节点启动的稳定性和成功率
+- ✅ 增强了启动过程的日志记录
+
+### v1.0.3
 - 🆕 **新功能**：添加详细日志模式，可切换显示安装过程的详细输出
 - 🔧 **体验优化**：改进安装和启动过程的日志显示，分步骤展示进度
 - 🐛 **故障排除**：详细日志模式帮助用户快速定位安装或启动过程中的问题

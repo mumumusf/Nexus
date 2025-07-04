@@ -429,8 +429,15 @@ class NexusMultiRunner {
             // 5. 使用screen在后台运行nexus，并重定向输出到日志文件
             console.log('\n🚀 步骤5: 启动nexus节点...');
             const logFile = `~/.nexus/logs/nexus-${nodeId}.log`;
-            const runCommand = `screen -dmS nexus-${nodeId} bash -c 'echo "启动nexus节点: ${nodeId}" > ${logFile}; ~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 | tee -a ${logFile}; echo "nexus进程退出，退出码: $?" >> ${logFile}'`;
-            await this.execInContainer(containerName, runCommand, this.verboseMode);
+            
+            // 分步执行，避免复杂的引号嵌套问题
+            console.log('📝 创建启动日志...');
+            await this.execInContainer(containerName, `echo "启动nexus节点: ${nodeId} - $(date)" > ${logFile}`, this.verboseMode);
+            
+            // 使用简化的screen命令启动nexus
+            console.log('🎬 启动screen会话...');
+            const screenCommand = `screen -dmS nexus-${nodeId} bash -c "~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 | tee -a ${logFile}; echo 'nexus进程退出，退出码: '\$? >> ${logFile}"`;
+            await this.execInContainer(containerName, screenCommand, this.verboseMode);
             
             // 6. 等待一下，然后检查进程是否启动
             console.log('\n⏳ 步骤6: 等待进程启动...');
