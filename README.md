@@ -94,9 +94,10 @@
 3. **创建交互式容器** - 创建单个交互式容器，可手动操作
 4. **开始部署节点** - 创建并启动多个nexus节点
 5. **查看节点状态** - 查看所有Docker容器的状态
-6. **查看节点日志** - 查看每个节点的运行日志
-7. **停止所有节点** - 停止并删除所有nexus容器
-8. **退出** - 退出程序
+6. **查看节点日志** - 查看每个节点的详细运行日志
+7. **重启nexus节点** - 重启所有运行中的nexus节点
+8. **停止所有节点** - 停止并删除所有nexus容器
+9. **退出** - 退出程序
 
 ### 部署流程
 
@@ -123,9 +124,26 @@
 3. 容器创建后会自动进入bash终端
 4. 手动运行安装命令：
    ```bash
-   apt update && apt install -y curl wget git screen build-essential libssl-dev
+   # 更新包管理器
+   apt update
+   
+   # 安装基础工具
+   apt install -y curl wget git build-essential libssl-dev
+   
+   # 安装screen（重要：用于后台运行）
+   apt install -y screen
+   
+   # 安装nexus CLI
    curl -L https://cli.nexus.xyz | sh
-   ~/.nexus/bin/nexus-network start --node-id your-node-id
+   
+   # 使用screen后台运行nexus
+   screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id"
+   
+   # 查看screen会话
+   screen -ls
+   
+   # 连接到nexus会话
+   screen -r nexus-your-node-id
    ```
 
 ### 节点命名规则
@@ -141,7 +159,7 @@
 - **CPU限制**: 1核心
 - **重启策略**: 除非手动停止
 - **挂载目录**: 主机目录挂载到容器的/workspace
-- **基础环境**: curl, wget, git, screen, build-essential, libssl-dev
+- **基础环境**: curl, wget, git, build-essential, libssl-dev, screen (单独安装确保可用)
 
 ## 常见问题
 
@@ -258,6 +276,47 @@ apt install procps coreutils
 # 或者忽略检测失败，直接使用默认值
 ```
 
+### 节点日志问题
+如果查看节点日志时遇到问题，脚本会显示多种类型的日志：
+
+1. **Docker容器日志** - 容器启动和运行日志
+2. **容器内进程** - 查看正在运行的进程
+3. **Screen会话列表** - 后台运行的screen会话
+4. **Nexus相关文件** - ~/.nexus目录下的文件
+5. **Nexus日志文件** - 实际的nexus运行日志
+6. **系统日志** - 系统级别的错误信息
+
+### 节点重启功能
+如果nexus节点停止响应或出现问题，可以使用"重启nexus节点"功能：
+- 自动停止所有nexus进程
+- 清理screen会话
+- 重新启动nexus节点
+- 保持容器运行状态
+
+### Screen相关问题
+如果screen命令失败，通常是因为screen未正确安装：
+
+```bash
+# 检查screen是否安装
+docker exec container-name which screen
+
+# 如果未安装，手动安装
+docker exec container-name apt update
+docker exec container-name apt install -y screen
+
+# 验证安装
+docker exec container-name screen --version
+
+# 查看现有screen会话
+docker exec container-name screen -ls
+
+# 连接到特定会话
+docker exec -it container-name screen -r session-name
+
+# 创建新的后台会话
+docker exec container-name screen -dmS nexus-test bash -c "echo 'test'; sleep 10"
+```
+
 ## 命令行操作
 
 如果需要手动操作容器，可以使用以下命令：
@@ -285,13 +344,26 @@ tail -f ~/.nexus/logs/nexus.log
 docker run -it --name my-nexus -v $HOME:/workspace ubuntu:24.04 bash
 
 # 安装完整的基础环境
-apt update && apt install -y curl wget git screen build-essential libssl-dev
+apt update
+apt install -y curl wget git build-essential libssl-dev
+
+# 安装screen（后台运行必需）
+apt install -y screen
+
+# 验证screen安装
+screen --version
 
 # 安装nexus CLI
 curl -L https://cli.nexus.xyz | sh
 
-# 启动nexus节点
-~/.nexus/bin/nexus-network start --node-id your-node-id
+# 使用screen后台启动nexus节点
+screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id 2>&1 | tee ~/.nexus/logs/nexus.log"
+
+# 查看screen会话
+screen -ls
+
+# 连接到nexus会话
+screen -r nexus-your-node-id
 ```
 
 ## 安全提示
@@ -374,15 +446,28 @@ npm start
 ## 版本信息
 
 - 项目名称: Yoyom
-- 版本: 1.0.0
+- 版本: 1.0.1
 - 推荐Node.js版本: 22.13.1
 - 推荐npm版本: 10.9.2
 - 支持的Nexus版本: 最新版本
 - 测试环境: Windows 10/11 + Docker Desktop, Linux + Docker CE, macOS + Docker Desktop
-- 新增功能: 
-  - 跨平台系统资源检测（Windows/Linux/macOS）
-  - 自动Docker安装（Linux/macOS）
-  - 主机目录挂载
-  - 交互式容器创建
-  - 完整的基础环境安装
-  - nvm版本管理支持 
+
+## 更新日志
+
+### v1.0.1 (最新)
+- ✅ 修复Linux环境下系统资源检测失败的问题
+- ✅ 添加跨平台系统资源检测（Windows/Linux/macOS）
+- ✅ 增强日志查看功能，支持多种日志类型
+- ✅ 添加nexus节点重启功能
+- ✅ 改进nexus启动流程，增加进程状态检查
+- ✅ 单独安装screen确保后台运行可用
+- ✅ 添加screen安装验证和故障排除
+- ✅ 添加详细的故障排除指南
+
+### v1.0.0
+- 🎉 初始版本发布
+- ✅ 自动Docker安装（Linux/macOS）
+- ✅ 主机目录挂载
+- ✅ 交互式容器创建
+- ✅ 完整的基础环境安装
+- ✅ nvm版本管理支持 

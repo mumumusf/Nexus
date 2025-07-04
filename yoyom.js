@@ -187,8 +187,11 @@ class NexusMultiRunner {
         console.log(`🚀 创建交互式容器: ${containerName}`);
         console.log(`📁 主机目录 ${homeDir} 将挂载到容器的 /workspace`);
         console.log('💡 进入容器后，运行以下命令安装基础环境:');
-        console.log('apt update && apt install -y curl wget git screen build-essential libssl-dev');
+        console.log('apt update');
+        console.log('apt install -y curl wget git build-essential libssl-dev');
+        console.log('apt install -y screen');
         console.log('然后运行: curl -L https://cli.nexus.xyz | sh');
+        console.log('最后运行: screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id"');
         console.log('\n按 Ctrl+C 退出容器，返回主菜单\n');
         
         try {
@@ -259,11 +262,30 @@ class NexusMultiRunner {
             console.log('🔄 更新包管理器...');
             await this.execInContainer(containerName, 'apt update');
             
-            console.log('📦 安装基础运行环境...');
-            await this.execInContainer(containerName, 'apt install -y curl wget git screen build-essential libssl-dev');
+            console.log('📦 安装基础系统工具...');
+            await this.execInContainer(containerName, 'apt install -y curl wget git build-essential libssl-dev');
+            
+            console.log('📺 安装screen...');
+            await this.execInContainer(containerName, 'apt install -y screen');
+            
+            console.log('🔍 验证screen安装...');
+            try {
+                const screenVersion = await this.execInContainer(containerName, 'screen --version');
+                console.log('Screen版本:', screenVersion.trim());
+            } catch (err) {
+                console.log('⚠️ 无法验证screen版本，但继续安装过程');
+            }
             
             console.log('⬇️ 下载并安装nexus CLI...');
             await this.execInContainer(containerName, 'curl -L https://cli.nexus.xyz | sh');
+            
+            console.log('🔍 验证nexus CLI安装...');
+            try {
+                const nexusPath = await this.execInContainer(containerName, 'ls -la ~/.nexus/bin/ 2>/dev/null || echo "nexus未安装"');
+                console.log('Nexus CLI文件:', nexusPath.trim());
+            } catch (err) {
+                console.log('⚠️ 无法验证nexus CLI安装');
+            }
             
             console.log(`✅ 容器 ${containerName} 中nexus安装成功`);
             return true;
@@ -278,11 +300,51 @@ class NexusMultiRunner {
         console.log(`🎯 在容器 ${containerName} 中运行nexus节点...`);
         
         try {
-            // 使用screen在后台运行nexus
-            const runCommand = `screen -dmS nexus-${nodeId} bash -c '~/.nexus/bin/nexus-network start --node-id ${nodeId}'`;
+            // 1. 检查nexus是否已安装
+            console.log('🔍 检查nexus安装状态...');
+            try {
+                const nexusVersion = await this.execInContainer(containerName, '~/.nexus/bin/nexus-network --version 2>/dev/null || echo "not installed"');
+                console.log('Nexus版本:', nexusVersion.trim());
+            } catch (err) {
+                console.log('⚠️ 无法检查nexus版本');
+            }
+            
+            // 2. 创建日志目录
+            console.log('📁 创建日志目录...');
+            await this.execInContainer(containerName, 'mkdir -p ~/.nexus/logs');
+            
+            // 3. 使用screen在后台运行nexus，并重定向输出到日志文件
+            console.log('🚀 启动nexus节点...');
+            const runCommand = `screen -dmS nexus-${nodeId} bash -c '~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 | tee ~/.nexus/logs/nexus-${nodeId}.log'`;
             await this.execInContainer(containerName, runCommand);
             
-            console.log(`✅ 容器 ${containerName} 中nexus节点启动成功`);
+            // 4. 等待一下，然后检查进程是否启动
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            console.log('🔍 检查nexus进程状态...');
+            try {
+                const processes = await this.execInContainer(containerName, 'ps aux | grep nexus | grep -v grep');
+                if (processes.trim()) {
+                    console.log('✅ Nexus进程已启动:', processes.trim());
+                } else {
+                    console.log('⚠️ 未找到nexus进程');
+                }
+            } catch (err) {
+                console.log('⚠️ 无法检查nexus进程');
+            }
+            
+            // 5. 检查screen会话
+            try {
+                const screenSessions = await this.execInContainer(containerName, 'screen -ls');
+                console.log('📺 Screen会话:', screenSessions.trim());
+            } catch (err) {
+                console.log('⚠️ 无法检查screen会话');
+            }
+            
+            console.log(`✅ 容器 ${containerName} 中nexus节点启动命令已执行`);
+            console.log(`📄 日志文件位置: ~/.nexus/logs/nexus-${nodeId}.log`);
+            console.log(`📺 Screen会话名称: nexus-${nodeId}`);
+            
             return true;
         } catch (error) {
             console.error(`❌ 容器 ${containerName} 中nexus节点启动失败:`, error.message);
@@ -295,13 +357,59 @@ class NexusMultiRunner {
         console.log(`📋 查看容器 ${containerName} 的日志:`);
         
         try {
-            // 查看screen会话列表
-            const screenList = await this.execInContainer(containerName, 'screen -ls');
-            console.log('Screen会话列表:', screenList);
+            // 1. 查看Docker容器日志
+            console.log('\n--- Docker容器日志 ---');
+            try {
+                const dockerLogs = await this.execCommand(`docker logs ${containerName} --tail 20`);
+                console.log(dockerLogs || '暂无Docker日志');
+            } catch (err) {
+                console.log('无法获取Docker日志:', err.message);
+            }
             
-            // 查看nexus日志
-            const logs = await this.execInContainer(containerName, 'screen -S nexus-* -X hardcopy /tmp/nexus.log; cat /tmp/nexus.log 2>/dev/null || echo "暂无日志"');
-            console.log('Nexus日志:', logs);
+            // 2. 查看容器内进程
+            console.log('\n--- 容器内进程 ---');
+            try {
+                const processes = await this.execInContainer(containerName, 'ps aux');
+                console.log(processes || '暂无进程信息');
+            } catch (err) {
+                console.log('无法获取进程信息:', err.message);
+            }
+            
+            // 3. 查看screen会话列表
+            console.log('\n--- Screen会话列表 ---');
+            try {
+                const screenList = await this.execInContainer(containerName, 'screen -ls');
+                console.log(screenList || '暂无screen会话');
+            } catch (err) {
+                console.log('无法获取screen会话:', err.message);
+            }
+            
+            // 4. 查看nexus相关文件
+            console.log('\n--- Nexus相关文件 ---');
+            try {
+                const nexusFiles = await this.execInContainer(containerName, 'ls -la ~/.nexus/ 2>/dev/null || echo "nexus目录不存在"');
+                console.log(nexusFiles);
+            } catch (err) {
+                console.log('无法查看nexus文件:', err.message);
+            }
+            
+            // 5. 查看nexus日志文件
+            console.log('\n--- Nexus日志文件 ---');
+            try {
+                const nexusLogs = await this.execInContainer(containerName, 'find ~/.nexus -name "*.log" -exec tail -10 {} \\; 2>/dev/null || echo "暂无nexus日志文件"');
+                console.log(nexusLogs || '暂无nexus日志');
+            } catch (err) {
+                console.log('无法读取nexus日志:', err.message);
+            }
+            
+            // 6. 查看系统日志
+            console.log('\n--- 系统日志 ---');
+            try {
+                const systemLogs = await this.execInContainer(containerName, 'tail -10 /var/log/syslog 2>/dev/null || dmesg | tail -10 2>/dev/null || echo "暂无系统日志"');
+                console.log(systemLogs || '暂无系统日志');
+            } catch (err) {
+                console.log('无法获取系统日志:', err.message);
+            }
             
         } catch (error) {
             console.error(`❌ 查看容器 ${containerName} 日志失败:`, error.message);
@@ -317,11 +425,12 @@ class NexusMultiRunner {
         console.log('4. 开始部署节点');
         console.log('5. 查看节点状态');
         console.log('6. 查看节点日志');
-        console.log('7. 停止所有节点');
-        console.log('8. 退出');
+        console.log('7. 重启nexus节点');
+        console.log('8. 停止所有节点');
+        console.log('9. 退出');
         console.log('====================');
         
-        const choice = await this.getUserInput('请选择操作 (1-8): ');
+        const choice = await this.getUserInput('请选择操作 (1-9): ');
         
         switch (choice) {
             case '1':
@@ -343,9 +452,12 @@ class NexusMultiRunner {
                 await this.viewNodeLogs();
                 break;
             case '7':
-                await this.stopAllNodes();
+                await this.restartNexusNodes();
                 break;
             case '8':
+                await this.stopAllNodes();
+                break;
+            case '9':
                 this.rl.close();
                 process.exit(0);
                 break;
@@ -435,6 +547,61 @@ class NexusMultiRunner {
         for (const container of this.containers) {
             console.log(`\n--- ${container.name} (${container.nodeId}) ---`);
             await this.viewContainerLogs(container.name);
+        }
+    }
+
+    // 重启nexus节点
+    async restartNexusNodes() {
+        console.log('\n🔄 重启nexus节点...');
+        
+        try {
+            // 获取所有nexus容器
+            const containerList = await this.execCommand('docker ps -q --filter "name=nexus-node-"');
+            const containerIds = containerList.trim().split('\n').filter(id => id.trim());
+            
+            if (containerIds.length === 0) {
+                console.log('⚠️ 没有找到运行中的nexus节点');
+                return;
+            }
+            
+            console.log(`🔍 找到 ${containerIds.length} 个nexus容器`);
+            
+            for (const containerId of containerIds) {
+                try {
+                    // 获取容器名称
+                    const containerName = await this.execCommand(`docker ps --format "{{.Names}}" --filter "id=${containerId}"`);
+                    const name = containerName.trim();
+                    
+                    console.log(`\n🔄 重启容器 ${name}...`);
+                    
+                    // 停止容器中的nexus进程
+                    console.log('🛑 停止nexus进程...');
+                    try {
+                        await this.execInContainer(name, 'pkill -f nexus-network');
+                        await this.execInContainer(name, 'screen -wipe'); // 清理screen会话
+                    } catch (err) {
+                        console.log('⚠️ 停止进程时出现问题:', err.message);
+                    }
+                    
+                    // 等待进程完全停止
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // 重新启动nexus
+                    console.log('🚀 重新启动nexus...');
+                    const nodeId = this.containers.find(c => c.name === name)?.nodeId || 'unknown';
+                    await this.runNexusInContainer(name, nodeId);
+                    
+                    console.log(`✅ 容器 ${name} 重启完成`);
+                    
+                } catch (error) {
+                    console.error(`❌ 重启容器 ${containerId} 失败:`, error.message);
+                }
+            }
+            
+            console.log('\n✅ 所有nexus节点重启完成');
+            
+        } catch (error) {
+            console.error('❌ 重启节点失败:', error.message);
         }
     }
 

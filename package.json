@@ -1,6 +1,6 @@
 {
   "name": "yoyom",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Nexus多开运行器 - 在多个Docker容器中运行Nexus节点",
   "main": "yoyom.js",
   "scripts": {
