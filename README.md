@@ -13,9 +13,18 @@
 
 ## 系统要求
 
-- Node.js 14.0+
+- Node.js 14.0+ (推荐使用Node.js 22)
+- npm (Node Package Manager)
 - Docker Desktop
 - 至少3GB内存（每个节点需要3GB内存）
+
+### 为什么推荐使用nvm和Node.js 22？
+
+- **版本管理**：nvm可以轻松管理多个Node.js版本
+- **最新特性**：Node.js 22是最新的LTS版本，性能更好
+- **避免权限问题**：nvm安装在用户目录，避免sudo权限问题
+- **更好的npm版本**：自带npm 10.9.2，功能更完善
+- **环境隔离**：不同项目可以使用不同的Node.js版本
 
 ## 安装和使用
 
@@ -25,12 +34,51 @@
    cd Nexus
    ```
 
-2. **安装依赖**
+2. **安装Node.js和npm** (推荐使用nvm)
+   
+   **方法一：使用nvm管理Node.js版本（推荐）**
+   ```bash
+   # 1. 下载并安装nvm
+   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+   
+   # 2. 重新加载shell配置
+   source ~/.bashrc   # 如果使用bash
+   source ~/.zshrc    # 如果使用zsh
+   
+   # 3. 安装Node.js 22
+   nvm install 22
+   nvm list
+   
+   # 4. 使用Node.js 22
+   nvm use 22
+   nvm alias default 22
+   
+   # 5. 验证安装
+   node -v   # 预期输出: v22.13.1
+   nvm current # 预期输出: v22.13.1
+   npm -v    # 预期输出: 10.9.2
+   ```
+   
+   **方法二：直接通过包管理器安装**
+   ```bash
+   # Ubuntu/Debian
+   apt update
+   apt install nodejs npm
+   
+   # CentOS/RHEL
+   yum install nodejs npm
+   
+   # 检查版本
+   node --version
+   npm --version
+   ```
+
+3. **安装依赖**
    ```bash
    npm install
    ```
 
-3. **启动脚本**
+4. **启动脚本**
    ```bash
    npm start
    # 或者直接运行
@@ -97,6 +145,45 @@
 
 ## 常见问题
 
+### npm未安装
+如果出现 `Command 'npm' not found` 错误：
+
+**推荐方案：使用nvm**
+```bash
+# 1. 安装nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+
+# 2. 安装Node.js 22
+nvm install 22
+nvm use 22
+nvm alias default 22
+
+# 3. 验证安装
+node -v      # 预期输出: v22.13.1
+npm -v       # 预期输出: 10.9.2
+```
+
+**快速方案：直接安装**
+```bash
+# Ubuntu/Debian
+apt update
+apt install nodejs npm
+
+# CentOS/RHEL
+yum install nodejs npm
+
+# 验证安装
+node --version
+npm --version
+```
+
+**或者直接运行脚本**：
+```bash
+# 如果只安装了Node.js，可以直接运行
+node yoyom.js
+```
+
 ### Docker未安装
 - **Windows**: 建议手动安装Docker Desktop或使用 `winget install Docker.DockerDesktop`
 - **Linux/macOS**: 脚本会自动安装，或手动运行 `curl -fsSL https://get.docker.com | bash`
@@ -119,6 +206,40 @@
 - 使用 `exit` 退出容器
 - 容器内的 `/workspace` 目录对应主机目录
 - 可以在容器内直接编辑主机文件
+
+### nvm相关问题
+如果nvm安装后无法使用：
+```bash
+# 1. 重新加载配置文件
+source ~/.bashrc
+# 或者
+source ~/.zshrc
+
+# 2. 验证nvm是否可用
+nvm --version
+
+# 3. 如果还是不行，手动添加到shell配置
+echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.bashrc
+echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> ~/.bashrc
+echo '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Node.js版本问题
+如果需要切换Node.js版本：
+```bash
+# 查看已安装的版本
+nvm list
+
+# 切换到特定版本
+nvm use 22
+
+# 设置默认版本
+nvm alias default 22
+
+# 查看当前使用的版本
+nvm current
+```
 
 ## 命令行操作
 
@@ -165,19 +286,61 @@ curl -L https://cli.nexus.xyz | sh
 
 ## 快速开始
 
+### Ubuntu环境快速启动
+如果你正在Ubuntu环境中，按照以下步骤快速开始：
+
+**推荐方案（使用nvm）**：
+```bash
+# 1. 安装nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+
+# 2. 安装Node.js 22
+nvm install 22
+nvm use 22
+nvm alias default 22
+
+# 3. 验证安装
+node -v      # 预期输出: v22.13.1
+npm -v       # 预期输出: 10.9.2
+
+# 4. 运行脚本
+node yoyom.js
+# 或者
+npm start
+```
+
+**快速方案（直接安装）**：
+```bash
+# 1. 安装Node.js和npm
+apt update
+apt install nodejs npm
+
+# 2. 验证安装
+node --version
+npm --version
+
+# 3. 运行脚本
+node yoyom.js
+# 或者
+npm start
+```
+
 ### 第一次使用
-1. 运行脚本: `npm start` 或 `node yoyom.js`
-2. 选择"初始化环境"（选项2）
-3. 等待Docker安装和镜像拉取完成
-4. 选择"开始部署节点"（选项4）
-5. 输入节点数量和基础节点ID
-6. 等待自动部署完成
+1. 安装Node.js: 使用nvm（推荐）或直接安装 `apt install nodejs npm`
+2. 运行脚本: `npm start` 或 `node yoyom.js`
+3. 选择"初始化环境"（选项2）
+4. 等待Docker安装和镜像拉取完成
+5. 选择"开始部署节点"（选项4）
+6. 输入节点数量和基础节点ID
+7. 等待自动部署完成
 
 ### 手动操作
-1. 运行脚本: `npm start` 或 `node yoyom.js`
-2. 选择"创建交互式容器"（选项3）
-3. 进入容器后手动安装和配置
-4. 使用 `exit` 退出容器返回主菜单
+1. 安装Node.js: 使用nvm（推荐）或直接安装 `apt install nodejs npm`
+2. 运行脚本: `npm start` 或 `node yoyom.js`
+3. 选择"创建交互式容器"（选项3）
+4. 进入容器后手动安装和配置
+5. 使用 `exit` 退出容器返回主菜单
 
 ## 支持
 
@@ -195,10 +358,13 @@ curl -L https://cli.nexus.xyz | sh
 
 - 项目名称: Yoyom
 - 版本: 1.0.0
+- 推荐Node.js版本: 22.13.1
+- 推荐npm版本: 10.9.2
 - 支持的Nexus版本: 最新版本
 - 测试环境: Windows 10/11 + Docker Desktop, Linux + Docker CE
 - 新增功能: 
   - 自动Docker安装（Linux/macOS）
   - 主机目录挂载
   - 交互式容器创建
-  - 完整的基础环境安装 
+  - 完整的基础环境安装
+  - nvm版本管理支持 
