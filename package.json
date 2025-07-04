@@ -1,0 +1,32 @@
+{
+  "name": "nexus-node-manager",
+  "version": "1.0.0",
+  "description": "Nexus节点管理器 - 自动化部署和管理多个Nexus节点",
+  "main": "nexus-node-manager.js",
+  "scripts": {
+    "start": "node nexus-node-manager.js",
+    "dev": "node nexus-node-manager.js"
+  },
+  "keywords": [
+    "nexus",
+    "blockchain",
+    "node",
+    "docker",
+    "automation"
+  ],
+  "author": "Nexus Node Manager",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "bin": {
+    "nexus-manager": "./nexus-node-manager.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "preferGlobal": false
+} 
