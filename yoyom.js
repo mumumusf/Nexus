@@ -19,15 +19,38 @@ class NexusMultiRunner {
         console.log('🔍 检测系统资源...');
         
         try {
-            // 检测内存
-            const memoryInfo = await this.execCommand('wmic computersystem get TotalPhysicalMemory /value');
-            const memoryMatch = memoryInfo.match(/TotalPhysicalMemory=(\d+)/);
-            const totalMemoryGB = Math.floor(parseInt(memoryMatch[1]) / (1024 * 1024 * 1024));
+            const platform = process.platform;
+            let totalMemoryGB, cpuCores;
             
-            // 检测CPU核心数
-            const cpuInfo = await this.execCommand('wmic cpu get NumberOfCores /value');
-            const cpuMatch = cpuInfo.match(/NumberOfCores=(\d+)/);
-            const cpuCores = parseInt(cpuMatch[1]);
+            if (platform === 'win32') {
+                // Windows
+                const memoryInfo = await this.execCommand('wmic computersystem get TotalPhysicalMemory /value');
+                const memoryMatch = memoryInfo.match(/TotalPhysicalMemory=(\d+)/);
+                totalMemoryGB = Math.floor(parseInt(memoryMatch[1]) / (1024 * 1024 * 1024));
+                
+                const cpuInfo = await this.execCommand('wmic cpu get NumberOfCores /value');
+                const cpuMatch = cpuInfo.match(/NumberOfCores=(\d+)/);
+                cpuCores = parseInt(cpuMatch[1]);
+                
+            } else if (platform === 'linux') {
+                // Linux
+                const memoryInfo = await this.execCommand('free -b | grep "Mem:" | awk \'{print $2}\'');
+                totalMemoryGB = Math.floor(parseInt(memoryInfo.trim()) / (1024 * 1024 * 1024));
+                
+                const cpuInfo = await this.execCommand('nproc');
+                cpuCores = parseInt(cpuInfo.trim());
+                
+            } else if (platform === 'darwin') {
+                // macOS
+                const memoryInfo = await this.execCommand('sysctl -n hw.memsize');
+                totalMemoryGB = Math.floor(parseInt(memoryInfo.trim()) / (1024 * 1024 * 1024));
+                
+                const cpuInfo = await this.execCommand('sysctl -n hw.ncpu');
+                cpuCores = parseInt(cpuInfo.trim());
+                
+            } else {
+                throw new Error('不支持的操作系统');
+            }
             
             // 建议节点数量（每个节点需要3GB内存）
             const recommendedNodes = Math.floor(totalMemoryGB / 3);
@@ -35,10 +58,12 @@ class NexusMultiRunner {
             console.log(`💾 总内存: ${totalMemoryGB}GB`);
             console.log(`🖥️  CPU核心数: ${cpuCores}`);
             console.log(`🎯 建议节点数: ${recommendedNodes}个 (每个节点需要3GB内存)`);
+            console.log(`🖥️  检测到操作系统: ${platform}`);
             
             return { totalMemoryGB, cpuCores, recommendedNodes };
         } catch (error) {
             console.error('❌ 检测系统资源失败:', error.message);
+            console.log('⚠️  使用默认值：8GB内存，4CPU核心，建议2个节点');
             return { totalMemoryGB: 8, cpuCores: 4, recommendedNodes: 2 };
         }
     }

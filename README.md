@@ -4,7 +4,7 @@
 
 ## 功能特点
 
-- 🔍 **系统资源检测** - 自动检测CPU和内存，建议最佳节点数量
+- 🔍 **跨平台系统资源检测** - 自动检测CPU和内存，支持Windows/Linux/macOS
 - 🐳 **Docker容器管理** - 自动创建和管理Ubuntu 24.04容器
 - 📦 **自动安装** - 自动安装nexus CLI和必要依赖
 - 🎯 **多节点部署** - 支持同时运行多个nexus节点
@@ -241,6 +241,23 @@ nvm alias default 22
 nvm current
 ```
 
+### 系统资源检测失败
+如果系统资源检测失败，脚本会使用默认值（8GB内存，4CPU核心，建议2个节点）。
+
+不同操作系统的检测方式：
+- **Windows**: 使用`wmic`命令
+- **Linux**: 使用`free`和`nproc`命令
+- **macOS**: 使用`sysctl`命令
+
+如果检测失败，通常是因为缺少必要的系统工具，可以手动安装：
+```bash
+# Linux - 安装必要工具
+apt update
+apt install procps coreutils
+
+# 或者忽略检测失败，直接使用默认值
+```
+
 ## 命令行操作
 
 如果需要手动操作容器，可以使用以下命令：
@@ -361,8 +378,9 @@ npm start
 - 推荐Node.js版本: 22.13.1
 - 推荐npm版本: 10.9.2
 - 支持的Nexus版本: 最新版本
-- 测试环境: Windows 10/11 + Docker Desktop, Linux + Docker CE
+- 测试环境: Windows 10/11 + Docker Desktop, Linux + Docker CE, macOS + Docker Desktop
 - 新增功能: 
+  - 跨平台系统资源检测（Windows/Linux/macOS）
   - 自动Docker安装（Linux/macOS）
   - 主机目录挂载
   - 交互式容器创建
