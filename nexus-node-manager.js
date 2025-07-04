@@ -194,26 +194,18 @@ class NexusNodeManager {
             
             await this.executeInContainer(command);
             
-            // 等待一下确保进程启动
+            // 快速检查启动状态
             if (this.detailedLogs) console.log(`⏳ 等待进程启动...`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // 检查进程是否启动成功
-            if (this.detailedLogs) console.log(`🔍 检查进程状态...`);
-            try {
-                const { stdout } = await this.executeInContainer(`screen -ls | grep ${screenSessionName}`);
-                if (stdout.includes(screenSessionName)) {
-                    console.log(`✅ 节点 ${nodeId} 在screen会话 ${screenSessionName} 中启动成功`);
-                    if (this.detailedLogs) {
-                        console.log(`📊 启动信息:`);
-                        console.log(`   - 日志文件: ${logFile}`);
-                        console.log(`   - 查看日志: docker exec -it ${this.containerName} bash -c "tail -f ${logFile}"`);
-                    }
-                } else {
-                    throw new Error('Screen会话未找到');
-                }
-            } catch (checkError) {
-                console.log(`⚠️ 无法确认启动状态，但命令已执行`);
+            // 简化的状态检查
+            console.log(`✅ 节点 ${nodeId} 启动命令已执行`);
+            if (this.detailedLogs) {
+                console.log(`📊 启动信息:`);
+                console.log(`   - Screen会话: ${screenSessionName}`);
+                console.log(`   - 日志文件: ${logFile}`);
+                console.log(`   - 查看实时日志: docker exec -it ${this.containerName} bash -c "tail -f ${logFile}"`);
+                console.log(`   - 查看screen会话: docker exec -it ${this.containerName} bash -c "screen -ls"`);
             }
             
             this.nodeInstances.push({
@@ -321,29 +313,50 @@ class NexusNodeManager {
         }
 
         try {
-            // 获取screen会话列表
-            const { stdout } = await this.executeInContainer('screen -ls');
-            const activeSessions = stdout.split('\n').filter(line => line.includes('nexus-node'));
-
             console.log(`   总计节点: ${this.nodeInstances.length}`);
             console.log('-'.repeat(80));
             
             for (const node of this.nodeInstances) {
-                const isActive = activeSessions.some(session => session.includes(node.screenSession));
-                const status = isActive ? '🟢 运行中' : '🔴 已停止';
+                // 简化状态检查，避免可能的卡住问题
+                let status = '🟡 状态未知';
+                let screenStatus = '';
+                
+                try {
+                    const { stdout } = await this.executeInContainer(`timeout 3 screen -ls 2>/dev/null || echo "timeout"`);
+                    if (stdout.includes('timeout')) {
+                        status = '🟡 检查超时';
+                    } else if (stdout.includes(node.screenSession)) {
+                        status = '🟢 Screen运行中';
+                        screenStatus = '✅ Screen会话活跃';
+                    } else {
+                        status = '🔴 Screen未找到';
+                        screenStatus = '❌ Screen会话不存在';
+                    }
+                } catch (error) {
+                    status = '🟡 检查失败';
+                    screenStatus = '⚠️ 无法检查Screen状态';
+                }
+
                 console.log(`   节点ID: ${node.nodeId}`);
                 console.log(`   Screen会话: ${node.screenSession}`);
                 console.log(`   状态: ${status}`);
+                if (screenStatus) console.log(`   Screen状态: ${screenStatus}`);
+                
                 if (node.logFile) {
                     console.log(`   日志文件: ${node.logFile}`);
                     
                     // 显示最近的日志（如果开启详细模式）
                     if (this.detailedLogs) {
                         try {
-                            const { stdout: logContent } = await this.executeInContainer(`tail -3 ${node.logFile} 2>/dev/null || echo "暂无日志"`);
+                            const { stdout: logContent } = await this.executeInContainer(`timeout 2 tail -3 ${node.logFile} 2>/dev/null || echo "无法读取日志"`);
                             const logs = logContent.trim();
-                            if (logs && logs !== "暂无日志") {
-                                console.log(`   最近日志: ${logs.split('\n')[0]}...`);
+                            if (logs && logs !== "无法读取日志" && logs !== "暂无日志") {
+                                const firstLine = logs.split('\n')[0];
+                                if (firstLine.length > 50) {
+                                    console.log(`   最近日志: ${firstLine.substring(0, 50)}...`);
+                                } else {
+                                    console.log(`   最近日志: ${firstLine}`);
+                                }
                             }
                         } catch (logError) {
                             // 忽略日志读取错误
@@ -357,9 +370,11 @@ class NexusNodeManager {
                 console.log('\n💡 提示:');
                 console.log('   - 选择菜单选项 3 查看详细日志');
                 console.log('   - 输入 v 开启详细日志模式显示更多信息');
+                console.log('   - 如果状态显示异常，节点可能仍在正常运行');
             }
         } catch (error) {
             console.error('获取状态失败:', error.message);
+            console.log('\n💡 提示: 即使状态检查失败，节点可能仍在正常运行');
         }
     }
 
