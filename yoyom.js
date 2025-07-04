@@ -420,10 +420,14 @@ class NexusMultiRunner {
             console.log('📝 创建启动日志...');
             await this.execInContainer(containerName, `echo "启动nexus节点: ${nodeId} - $(date)" > ${logFile}`, this.verboseMode);
             
-            // 直接启动nexus（使用nohup在后台运行）
+            // 直接启动nexus进程（在容器后台运行）
             console.log('🎯 直接启动nexus进程...');
-            const startCommand = `nohup ~/.nexus/bin/nexus-network start --node-id ${nodeId} >> ${logFile} 2>&1 &`;
+            // 使用更稳定的后台启动方式
+            const startCommand = `nohup ~/.nexus/bin/nexus-network start --node-id ${nodeId} > ${logFile} 2>&1 < /dev/null &`;
             await this.execInContainer(containerName, startCommand, this.verboseMode);
+            
+            // 确认进程已启动
+            await this.execInContainer(containerName, 'sleep 1', false);
             
             // 6. 等待一下，然后检查进程是否启动
             console.log('\n⏳ 步骤6: 等待进程启动...');
@@ -433,9 +437,22 @@ class NexusMultiRunner {
             try {
                 const processes = await this.execInContainer(containerName, 'ps aux | grep nexus | grep -v grep', this.verboseMode);
                 if (processes.trim()) {
-                    console.log('✅ Nexus进程已启动');
-                    if (this.verboseMode) {
+                    if (processes.includes('<defunct>')) {
+                        console.log('⚠️ Nexus进程启动失败（进程已退出）');
                         console.log('进程详情:', processes.trim());
+                        console.log('\n🔍 检查启动日志...');
+                        try {
+                            const startupLog = await this.execInContainer(containerName, `tail -10 ${logFile} 2>/dev/null || echo "日志文件不存在"`);
+                            console.log('启动日志:');
+                            console.log(startupLog);
+                        } catch (logErr) {
+                            console.log('无法读取启动日志:', logErr.message);
+                        }
+                    } else {
+                        console.log('✅ Nexus进程已启动');
+                        if (this.verboseMode) {
+                            console.log('进程详情:', processes.trim());
+                        }
                     }
                 } else {
                     console.log('⚠️ 未找到nexus进程，可能还在启动中');
@@ -452,9 +469,26 @@ class NexusMultiRunner {
             try {
                 const processes = await this.execInContainer(containerName, 'ps aux | grep nexus-network | grep -v grep', this.verboseMode);
                 if (processes.trim()) {
-                    console.log('✅ Nexus进程运行正常');
-                    if (this.verboseMode) {
+                    if (processes.includes('<defunct>')) {
+                        console.log('❌ Nexus进程已退出（defunct状态）');
                         console.log('进程详情:', processes.trim());
+                        console.log('\n🔍 检查最新日志信息...');
+                        try {
+                            const detailedLog = await this.execInContainer(containerName, `tail -20 ${logFile} 2>/dev/null || echo "无法读取日志文件"`);
+                            console.log('错误日志:');
+                            console.log(detailedLog);
+                        } catch (logErr) {
+                            console.log('无法读取日志:', logErr.message);
+                        }
+                        console.log('\n💡 可能的解决方案:');
+                        console.log('   1. 检查Node ID格式是否正确');
+                        console.log('   2. 使用菜单选项6查看详细日志');
+                        console.log('   3. 使用菜单选项7重启节点');
+                    } else {
+                        console.log('✅ Nexus进程运行正常');
+                        if (this.verboseMode) {
+                            console.log('进程详情:', processes.trim());
+                        }
                     }
                 } else {
                     console.log('⚠️ 未找到nexus-network进程，可能启动失败');
@@ -512,10 +546,20 @@ class NexusMultiRunner {
             try {
                 const nexusProcess = await this.execInContainer(containerName, 'ps aux | grep nexus-network | grep -v grep');
                 if (nexusProcess.trim()) {
-                    console.log('Nexus进程运行中:');
-                    console.log(nexusProcess);
+                    if (nexusProcess.includes('<defunct>')) {
+                        console.log('⚠️ Nexus进程异常退出（defunct状态）:');
+                        console.log(nexusProcess);
+                        console.log('\n💡 进程已退出，建议使用以下方法排查:');
+                        console.log('   1. 菜单选项 t - 手动测试nexus启动查看详细日志');
+                        console.log('   2. 菜单选项 7 - 重启nexus节点');
+                        console.log('   3. 检查Node ID格式是否正确');
+                    } else {
+                        console.log('✅ Nexus进程运行中:');
+                        console.log(nexusProcess);
+                    }
                 } else {
-                    console.log('未找到nexus-network进程');
+                    console.log('❌ 未找到nexus-network进程');
+                    console.log('💡 建议使用菜单选项 t 手动测试nexus启动');
                 }
             } catch (err) {
                 console.log('无法获取nexus进程状态:', err.message);
@@ -538,7 +582,7 @@ class NexusMultiRunner {
                 console.log('日志文件列表:', logFiles.trim());
                 
                 // 读取最新的日志内容
-                const nexusLogs = await this.execInContainer(containerName, 'find ~/.nexus/logs -name "*.log" -exec echo "=== {} ===" \\; -exec tail -20 {} \\; 2>/dev/null || echo "暂无nexus日志文件"');
+                const nexusLogs = await this.execInContainer(containerName, 'find ~/.nexus/logs -name "*.log" -exec sh -c \'echo "=== $1 ==="; tail -20 "$1"\' _ {} \\; 2>/dev/null || echo "暂无nexus日志文件"');
                 console.log('日志内容:');
                 console.log(nexusLogs || '暂无nexus日志');
             } catch (err) {
@@ -571,11 +615,12 @@ class NexusMultiRunner {
         console.log('7. 重启nexus节点');
         console.log('8. 清理冲突容器');
         console.log('9. 停止所有节点');
+        console.log('t. 手动测试nexus启动 (查看详细启动日志)');
         console.log(`v. 切换详细日志模式 (当前: ${this.verboseMode ? '开启' : '关闭'})`);
         console.log('0. 退出');
         console.log('====================');
         
-        const choice = await this.getUserInput('请选择操作 (0-9, v): ');
+        const choice = await this.getUserInput('请选择操作 (0-9, t, v): ');
         
         switch (choice) {
             case '1':
@@ -604,6 +649,10 @@ class NexusMultiRunner {
                 break;
             case '9':
                 await this.stopAllNodes();
+                break;
+            case 't':
+            case 'T':
+                await this.manualTestNexusStart();
                 break;
             case 'v':
             case 'V':
@@ -707,6 +756,141 @@ class NexusMultiRunner {
         for (const container of this.containers) {
             console.log(`\n--- ${container.name} (${container.nodeId}) ---`);
             await this.viewContainerLogs(container.name);
+        }
+    }
+
+    // 手动测试nexus启动
+    async manualTestNexusStart() {
+        console.log('\n🧪 手动测试nexus启动...');
+        
+        try {
+            // 获取所有nexus容器
+            const containerList = await this.execCommand('docker ps --format "{{.Names}}" --filter "name=nexus-node-"');
+            const containers = containerList.trim().split('\n').filter(name => name.trim());
+            
+            if (containers.length === 0) {
+                console.log('⚠️ 没有找到nexus容器');
+                console.log('💡 请先创建容器（菜单选项3或4）');
+                return;
+            }
+            
+            console.log('📋 发现的nexus容器:');
+            containers.forEach((name, index) => {
+                console.log(`   ${index + 1}. ${name}`);
+            });
+            
+            if (containers.length === 1) {
+                console.log(`\n🎯 自动选择容器: ${containers[0]}`);
+                await this.testNexusStartInContainer(containers[0]);
+            } else {
+                const choice = await this.getUserInput('\n请选择容器编号: ');
+                const index = parseInt(choice) - 1;
+                
+                if (index >= 0 && index < containers.length) {
+                    await this.testNexusStartInContainer(containers[index]);
+                } else {
+                    console.log('❌ 无效的选择');
+                }
+            }
+            
+        } catch (error) {
+            console.error('❌ 测试nexus启动失败:', error.message);
+        }
+    }
+
+    // 在指定容器中测试nexus启动
+    async testNexusStartInContainer(containerName) {
+        console.log(`\n🧪 ====== 在容器 ${containerName} 中测试nexus启动 ======`);
+        
+        try {
+            // 1. 获取或设置Node ID
+            const nodeIdInput = await this.getUserInput('请输入Node ID (留空使用默认值1230533101): ');
+            const nodeId = nodeIdInput.trim() || '1230533101';
+            
+            console.log(`🆔 使用Node ID: ${nodeId}`);
+            
+            // 2. 检查nexus是否已安装
+            console.log('\n🔍 步骤1: 检查nexus安装状态...');
+            try {
+                const nexusCheck = await this.execInContainer(containerName, 'ls -la ~/.nexus/bin/ 2>/dev/null || echo "nexus未安装"', true);
+                
+                if (nexusCheck.includes('nexus未安装')) {
+                    console.log('❌ nexus未安装，请先安装nexus');
+                    const installChoice = await this.getUserInput('是否现在安装nexus? (y/n): ');
+                    if (installChoice.toLowerCase() === 'y') {
+                        await this.installNexusInContainer(containerName);
+                    } else {
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.log('⚠️ 检查nexus安装状态失败:', err.message);
+            }
+            
+            // 3. 停止现有的nexus进程
+            console.log('\n🛑 步骤2: 停止现有nexus进程...');
+            try {
+                await this.execInContainer(containerName, 'pkill -f nexus-network || echo "没有运行中的nexus进程"', true);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            } catch (err) {
+                console.log('ℹ️ 停止进程时出现问题，继续执行');
+            }
+            
+            // 4. 创建测试日志文件
+            console.log('\n📝 步骤3: 准备测试环境...');
+            const testLogFile = `~/.nexus/logs/test-${nodeId}-${Date.now()}.log`;
+            await this.execInContainer(containerName, `mkdir -p ~/.nexus/logs`, true);
+            await this.execInContainer(containerName, `echo "=== Nexus启动测试 - $(date) ===" > ${testLogFile}`, true);
+            
+            // 5. 手动执行nexus命令并显示详细输出
+            console.log('\n🚀 步骤4: 手动执行nexus启动命令...');
+            console.log('📋 执行的完整命令:');
+            console.log(`   ~/.nexus/bin/nexus-network start --node-id ${nodeId}`);
+            console.log('\n⏳ 正在执行，请等待输出...');
+            console.log('=' .repeat(60));
+            
+            try {
+                // 使用timeout限制执行时间，并捕获所有输出
+                const nexusOutput = await this.execInContainer(
+                    containerName, 
+                    `timeout 30 ~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 || echo "\\n=== 命令执行结束 (可能被timeout终止) ==="`,
+                    true
+                );
+                
+                console.log('=' .repeat(60));
+                console.log('📤 Nexus启动输出:');
+                console.log(nexusOutput);
+                console.log('=' .repeat(60));
+                
+                // 保存输出到日志文件
+                await this.execInContainer(containerName, `echo "${nexusOutput.replace(/"/g, '\\"')}" >> ${testLogFile}`, false);
+                
+            } catch (err) {
+                console.log('❌ 执行nexus命令失败:', err.message);
+            }
+            
+            // 6. 检查进程状态
+            console.log('\n🔍 步骤5: 检查进程状态...');
+            try {
+                const processStatus = await this.execInContainer(containerName, 'ps aux | grep nexus | grep -v grep', true);
+                if (processStatus.trim()) {
+                    console.log('📊 当前nexus进程状态:');
+                    console.log(processStatus);
+                } else {
+                    console.log('ℹ️ 没有找到运行中的nexus进程');
+                }
+            } catch (err) {
+                console.log('⚠️ 检查进程状态失败:', err.message);
+            }
+            
+            // 7. 显示测试日志文件位置
+            console.log(`\n📄 测试日志已保存到: ${testLogFile}`);
+            console.log('💡 你可以使用菜单选项6查看完整日志');
+            
+            console.log(`\n✅ ====== 容器 ${containerName} nexus启动测试完成 ======`);
+            
+        } catch (error) {
+            console.error(`❌ 测试nexus启动失败:`, error.message);
         }
     }
 
