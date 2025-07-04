@@ -105,24 +105,12 @@ class NexusNodeManager {
             
             // 检查容器是否已存在
             try {
-                const { stdout } = await execAsync(`docker inspect ${this.containerName} --format='{{.State.Status}}'`);
-                const containerStatus = stdout.trim();
-                
-                if (containerStatus === 'running') {
-                    console.log('📦 容器已存在且正在运行，将复用现有容器');
-                    console.log('💡 这样可以保留之前运行的节点状态');
-                } else if (containerStatus === 'exited') {
-                    console.log('📦 容器已存在但已停止，正在启动...');
-                    await execAsync(`docker start ${this.containerName}`);
-                    console.log('✅ 容器已启动');
-                } else {
-                    console.log(`📦 容器状态: ${containerStatus}，正在启动...`);
-                    await execAsync(`docker start ${this.containerName}`);
-                    console.log('✅ 容器已启动');
-                }
+                await execAsync(`docker inspect ${this.containerName}`);
+                console.log('📦 容器已存在，正在重启...');
+                await execAsync(`docker restart ${this.containerName}`);
             } catch (error) {
                 // 容器不存在，创建新容器
-                console.log('📦 容器不存在，正在创建新容器...');
+                console.log('📦 正在创建新容器...');
                 const homeDir = os.homedir();
                 const createCommand = `docker run -d --name ${this.containerName} ` +
                     `--privileged ` +
@@ -142,10 +130,6 @@ class NexusNodeManager {
             await this.executeInContainer(installCommand);
             
             console.log('✅ 容器环境配置完成');
-            
-            // 检测已存在的节点会话
-            await this.detectExistingNodes();
-            
             return true;
         } catch (error) {
             console.error('❌ 创建容器失败:', error.message);
@@ -173,137 +157,6 @@ class NexusNodeManager {
                     reject(error);
                 });
         });
-    }
-
-    // 获取下一个可用的screen会话名称
-    async getNextAvailableSessionName() {
-        try {
-            // 获取所有已存在的会话名称
-            const existingSessionNumbers = [];
-            
-            // 检查已在nodeInstances中的会话
-            for (const node of this.nodeInstances) {
-                const match = node.screenSession.match(/nexus-node-(\d+)/);
-                if (match) {
-                    existingSessionNumbers.push(parseInt(match[1]));
-                }
-            }
-            
-            // 检查容器中实际存在的screen会话
-            try {
-                const { stdout } = await this.executeInContainer('screen -ls 2>/dev/null || echo "no sessions"', 3000);
-                const sessions = stdout.split('\n').filter(line => line.includes('nexus-node'));
-                
-                for (const sessionLine of sessions) {
-                    const match = sessionLine.match(/nexus-node-(\d+)/);
-                    if (match) {
-                        const num = parseInt(match[1]);
-                        if (!existingSessionNumbers.includes(num)) {
-                            existingSessionNumbers.push(num);
-                        }
-                    }
-                }
-            } catch (error) {
-                // 忽略检查错误
-            }
-            
-            // 找到下一个可用编号
-            let nextNumber = 1;
-            while (existingSessionNumbers.includes(nextNumber)) {
-                nextNumber++;
-            }
-            
-            return `nexus-node-${nextNumber}`;
-        } catch (error) {
-            // 如果检查失败，使用时间戳避免冲突
-            const timestamp = Date.now().toString().slice(-4);
-            return `nexus-node-${timestamp}`;
-        }
-    }
-
-    // 检测已存在的节点会话
-    async detectExistingNodes() {
-        try {
-            console.log('\n🔍 检测已存在的节点会话...');
-            
-            // 获取screen会话列表
-            const { stdout } = await this.executeInContainer('screen -ls 2>/dev/null || echo "no sessions"', 5000);
-            
-            if (stdout.includes('no sessions') || !stdout.includes('nexus-node')) {
-                console.log('   未发现已存在的节点会话');
-                return;
-            }
-
-            const sessions = stdout.split('\n').filter(line => line.includes('nexus-node'));
-            let detectedCount = 0;
-
-            for (const sessionLine of sessions) {
-                // 解析session信息: 123.nexus-node-1  (Detached)
-                const match = sessionLine.match(/\d+\.(nexus-node-\d+)/);
-                if (match) {
-                    const sessionName = match[1];
-                    
-                    // 尝试从日志文件中获取节点ID
-                    try {
-                        const logFiles = await this.executeInContainer(`ls ~/.nexus/logs/node-*.log 2>/dev/null || echo "no logs"`, 3000);
-                        let nodeId = 'unknown';
-                        let logFile = '';
-
-                        if (!logFiles.stdout.includes('no logs')) {
-                            // 查找对应的日志文件
-                            const logs = logFiles.stdout.split('\n').filter(f => f.includes('.log'));
-                            for (const log of logs) {
-                                const logMatch = log.match(/node-(\d+)\.log/);
-                                if (logMatch) {
-                                    // 检查日志文件内容中是否有这个session的信息
-                                    try {
-                                        const logContent = await this.executeInContainer(`head -10 ${log} 2>/dev/null || echo ""`, 2000);
-                                        if (logContent.stdout) {
-                                            nodeId = logMatch[1];
-                                            logFile = log;
-                                            break;
-                                        }
-                                    } catch (e) {
-                                        // 忽略单个日志文件读取错误
-                                    }
-                                }
-                            }
-                        }
-
-                        // 如果还是找不到nodeId，从session名称推断
-                        if (nodeId === 'unknown') {
-                            const sessionMatch = sessionName.match(/nexus-node-(\d+)/);
-                            if (sessionMatch) {
-                                nodeId = `session-${sessionMatch[1]}`;
-                                logFile = `~/.nexus/logs/node-${nodeId}.log`;
-                            }
-                        }
-
-                        this.nodeInstances.push({
-                            nodeId: nodeId,
-                            screenSession: sessionName,
-                            status: 'detected',
-                            logFile: logFile,
-                            startScript: `/tmp/start_nexus_${nodeId}.sh`
-                        });
-
-                        detectedCount++;
-                        console.log(`   📱 发现节点: ${nodeId} (${sessionName})`);
-                    } catch (error) {
-                        console.log(`   ⚠️ 发现session ${sessionName} 但无法确定节点ID`);
-                    }
-                }
-            }
-
-            if (detectedCount > 0) {
-                console.log(`✅ 成功检测到 ${detectedCount} 个已存在的节点会话`);
-                console.log('💡 您可以在菜单中查看这些节点的状态和日志');
-            }
-
-        } catch (error) {
-            console.log('⚠️ 检测已存在节点时出错:', error.message);
-            console.log('   这不影响新节点的启动');
-        }
     }
 
     // 安装Nexus CLI
@@ -468,9 +321,7 @@ nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}`;
         
         for (let i = 0; i < nodeIds.length; i++) {
             const nodeId = nodeIds[i];
-            
-            // 获取下一个可用的screen会话编号
-            const screenSessionName = await this.getNextAvailableSessionName();
+            const screenSessionName = `nexus-node-${i + 1}`;
             
             console.log(`\n📝 正在启动第 ${i + 1}/${nodeIds.length} 个节点...`);
             const success = await this.startNode(nodeId, screenSessionName);
@@ -489,25 +340,18 @@ nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}`;
         }
 
         // 启动完成总结
-        const existingNodes = this.nodeInstances.filter(node => node.status === 'detected').length;
-        const runningNodes = this.nodeInstances.filter(node => node.status === 'running').length;
-        
         console.log('\n' + '='.repeat(50));
         console.log('🎉 节点启动完成！');
         console.log('='.repeat(50));
-        console.log(`✅ 本次新启动: ${successCount} 个节点`);
+        console.log(`✅ 成功启动: ${successCount} 个节点`);
         if (failCount > 0) {
             console.log(`❌ 启动失败: ${failCount} 个节点`);
         }
-        if (existingNodes > 0) {
-            console.log(`♻️ 已存在节点: ${existingNodes} 个`);
-        }
-        console.log(`📊 总计管理节点: ${this.nodeInstances.length} 个`);
+        console.log(`📊 总计节点: ${this.nodeInstances.length} 个`);
         console.log('\n💡 提示:');
-        console.log('   - 选择菜单选项 2 查看所有节点状态');
-        console.log('   - 选择菜单选项 3 查看节点详细日志');
+        console.log('   - 选择菜单选项 2 查看节点状态');
+        console.log('   - 选择菜单选项 3 查看节点日志');
         console.log('   - 输入 v 切换详细日志模式');
-        console.log('   - 🔄 已存在的节点会自动保留状态');
         console.log('='.repeat(50));
         
         // 等待用户查看信息
@@ -537,21 +381,11 @@ nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}`;
                     if (stdout.includes('timeout')) {
                         status = '🟡 检查超时';
                     } else if (stdout.includes(node.screenSession)) {
-                        if (node.status === 'detected') {
-                            status = '🟢 已存在(运行中)';
-                            screenStatus = '♻️ 从之前会话恢复';
-                        } else {
-                            status = '🟢 新启动(运行中)';
-                            screenStatus = '✅ Screen会话活跃';
-                        }
+                        status = '🟢 Screen运行中';
+                        screenStatus = '✅ Screen会话活跃';
                     } else {
-                        if (node.status === 'detected') {
-                            status = '🔴 已存在(已停止)';
-                            screenStatus = '⚠️ 之前的会话已结束';
-                        } else {
-                            status = '🔴 新启动(已停止)';
-                            screenStatus = '❌ Screen会话不存在';
-                        }
+                        status = '🔴 Screen未找到';
+                        screenStatus = '❌ Screen会话不存在';
                     }
                 } catch (error) {
                     status = '🟡 检查失败';
@@ -791,19 +625,6 @@ nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}`;
         // 安装Nexus CLI
         if (!(await this.installNexusCLI())) {
             return;
-        }
-
-        // 显示检测到的节点信息
-        if (this.nodeInstances.length > 0) {
-            console.log('\n' + '='.repeat(50));
-            console.log('🔍 检测到已存在的节点会话');
-            console.log('='.repeat(50));
-            for (const node of this.nodeInstances) {
-                console.log(`   📱 节点 ${node.nodeId} (${node.screenSession})`);
-            }
-            console.log(`✅ 总计 ${this.nodeInstances.length} 个已存在节点已加载到管理器`);
-            console.log('💡 您可以在菜单中查看状态、日志或启动新节点');
-            console.log('='.repeat(50));
         }
 
         // 显示管理菜单
