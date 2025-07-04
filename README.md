@@ -9,6 +9,7 @@
 - 📦 **自动安装** - 自动安装nexus CLI和必要依赖
 - 🎯 **多节点部署** - 支持同时运行多个nexus节点
 - 📋 **日志查看** - 实时查看每个节点的运行日志
+- 📝 **详细日志模式** - 可切换的详细日志输出，便于故障排除和学习
 - 🛑 **一键停止** - 快速停止所有节点
 
 ## 系统要求
@@ -98,7 +99,29 @@
 7. **重启nexus节点** - 重启所有运行中的nexus节点
 8. **清理冲突容器** - 清理所有nexus相关容器，解决名称冲突
 9. **停止所有节点** - 停止并删除所有nexus容器
+v. **切换详细日志模式** - 开启/关闭安装和运行过程的详细日志输出
 0. **退出** - 退出程序
+
+### 详细日志模式
+
+脚本现在支持详细日志模式，帮助用户更好地了解安装和运行过程：
+
+- **开启详细日志**：显示每个命令的执行过程和输出结果
+- **关闭详细日志**：只显示关键步骤和结果信息
+- **默认状态**：详细日志模式默认开启
+
+**使用方法**：
+1. 在主菜单中输入 `v` 来切换模式
+2. 开启后，安装和启动过程会显示：
+   - 每个执行的命令
+   - 命令的完整输出结果
+   - 详细的错误信息和调试信息
+3. 关闭后，只显示步骤进度和最终结果
+
+**推荐使用场景**：
+- 🔍 **故障排除**：当安装或启动失败时，开启详细日志查看具体错误
+- 🎓 **学习过程**：了解脚本执行的具体步骤和命令
+- 🚀 **快速使用**：正常使用时可关闭详细日志，界面更简洁
 
 ### 部署流程
 
@@ -134,23 +157,69 @@
    # 安装screen（重要：用于后台运行）
    apt install -y screen
    
-   # 安装nexus CLI
+   # 安装nexus CLI（会提示确认，输入y）
    curl -L https://cli.nexus.xyz | sh
+   # 或者非交互模式：echo "y" | curl -L https://cli.nexus.xyz | sh
    
-   # 使用screen后台运行nexus
+   # 使用screen后台运行nexus（方法1：后台运行）
    screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id"
+   
+   # 或者方法2：前台运行（可以直接看到输出）
+   screen -S nexus
+   ~/.nexus/bin/nexus-network start --node-id your-node-id
+   # 按 Ctrl+A 然后 D 可以脱离screen会话
    
    # 查看screen会话
    screen -ls
    
    # 连接到nexus会话
    screen -r nexus-your-node-id
+   # 或者连接到名为nexus的会话
+   screen -r nexus
    ```
+
+### 经过验证的手动流程
+
+以下是用户验证过的完整手动安装流程：
+
+```bash
+# 1. 创建容器
+docker run -it --name nexus-ubuntu24 \
+  -v $HOME:/workspace \
+  ubuntu:24.04 bash
+
+# 2. 安装依赖
+apt update && apt install -y \
+  curl wget git screen build-essential libssl-dev
+
+# 3. 安装Nexus CLI（会提示确认）
+curl -L https://cli.nexus.xyz | sh
+# 当提示 "Do you want to install Nexus CLI? (y/N)" 时，输入 y
+
+# 4. 启动nexus节点
+screen -S nexus
+~/.nexus/bin/nexus-network start --node-id 6520503
+# 按 Ctrl+A 然后 D 脱离screen会话
+
+# 5. 验证运行状态
+screen -ls  # 查看screen会话
+ps aux | grep nexus  # 查看nexus进程
+```
+
+**重要提示**：
+- Node ID可以是纯数字（如：`6520503`）或字母数字组合
+- 安装Nexus CLI时需要手动确认，输入`y`
+- 使用screen确保节点在后台持续运行
 
 ### 节点命名规则
 
 - 容器名称：`nexus-node-1`, `nexus-node-2`, ...
-- 节点ID：`your-base-id-1`, `your-base-id-2`, ...
+- 节点ID：`yourbaseid01`, `yourbaseid02`, ... (仅包含字母和数字，无特殊字符)
+
+**重要说明**：
+- Node ID只能包含字母和数字，不能包含连字符、下划线等特殊字符
+- 脚本会自动将用户输入的基础ID与节点编号组合（如：mynode + 01 = mynode01）
+- 节点编号使用两位数字格式（01, 02, 03...）
 
 ## 容器配置
 
@@ -318,6 +387,34 @@ docker exec -it container-name screen -r session-name
 docker exec container-name screen -dmS nexus-test bash -c "echo 'test'; sleep 10"
 ```
 
+### Node ID格式错误
+
+**问题**：nexus启动失败，提示node-id格式无效
+```
+error: invalid value 'xxx-1' for '--node-id <NODE_ID>': invalid digit found in string
+```
+
+**解决方案**：
+1. Node ID只能包含字母和数字，不能有特殊字符（连字符、下划线等）
+2. 重新运行部署时，使用纯字母数字的基础ID（如：`mynode123`）
+3. 脚本会自动格式化为正确格式（如：`mynode12301`, `mynode12302`）
+4. 避免使用：`my-node`, `my_node`, `node@1` 等包含特殊字符的ID
+
+### Nexus进程问题
+
+**问题**：nexus进程异常退出或无法启动
+
+**解决方案**：
+1. 查看详细日志：
+   ```bash
+   docker exec nexus-node-1 cat ~/.nexus/logs/nexus-*.log
+   ```
+
+2. 检查系统资源是否足够（内存至少3GB每个节点）
+3. 验证node-id格式是否正确
+4. 尝试重启节点（选项7）
+5. 如果问题持续，删除容器重新部署
+
 ### 容器名称冲突问题
 如果遇到容器名称冲突错误（如 `Conflict. The container name "/nexus-node-1" is already in use`），有以下解决方案：
 
@@ -381,8 +478,9 @@ apt install -y screen
 # 验证screen安装
 screen --version
 
-# 安装nexus CLI
+# 安装nexus CLI（会提示确认，输入y）
 curl -L https://cli.nexus.xyz | sh
+# 或者非交互模式：echo "y" | curl -L https://cli.nexus.xyz | sh
 
 # 使用screen后台启动nexus节点
 screen -dmS nexus-your-node-id bash -c "~/.nexus/bin/nexus-network start --node-id your-node-id 2>&1 | tee ~/.nexus/logs/nexus.log"
@@ -459,6 +557,39 @@ npm start
 4. 进入容器后手动安装和配置
 5. 使用 `exit` 退出容器返回主菜单
 
+## 故障排除
+
+### 快速故障排除流程
+
+如果遇到安装或运行问题，建议按以下步骤排查：
+
+1. **🔍 开启详细日志模式**：
+   - 在主菜单输入 `v` 开启详细日志
+   - 重新执行失败的操作（如部署节点）
+   - 观察具体的错误信息和失败步骤
+
+2. **📋 查看详细输出**：
+   - 详细日志会显示每个命令的执行过程
+   - 可以看到具体的错误信息和系统输出
+   - 帮助识别是网络问题、权限问题还是系统环境问题
+
+3. **🔧 常见解决方案**：
+   - **网络问题**：检查网络连接，重试下载步骤
+   - **权限问题**：确保有Docker访问权限
+   - **容器冲突**：使用菜单选项8清理冲突容器
+   - **资源不足**：减少节点数量或增加系统内存
+
+4. **🚀 重新部署**：
+   - 使用菜单选项8清理所有容器
+   - 重新执行部署流程
+
+### 详细日志使用技巧
+
+- **开启时机**：遇到问题时立即开启详细日志
+- **关闭时机**：问题解决后可关闭，保持界面简洁
+- **查看重点**：关注标有❌的错误信息和命令执行失败的步骤
+- **调试信息**：详细日志包含完整的错误栈信息，便于深度调试
+
 ## 支持
 
 如果遇到问题，请检查：
@@ -466,6 +597,7 @@ npm start
 2. 网络连接是否正常
 3. 系统资源是否充足
 4. 节点ID是否正确
+5. 是否开启了详细日志模式来查看具体错误
 
 ## 相关项目
 
@@ -474,7 +606,7 @@ npm start
 ## 版本信息
 
 - 项目名称: Yoyom
-- 版本: 1.0.1
+- 版本: 1.0.3
 - 推荐Node.js版本: 22.13.1
 - 推荐npm版本: 10.9.2
 - 支持的Nexus版本: 最新版本
@@ -482,7 +614,24 @@ npm start
 
 ## 更新日志
 
-### v1.0.1 (最新)
+### v1.0.3 (最新)
+- 🆕 **新功能**：添加详细日志模式，可切换显示安装过程的详细输出
+- 🔧 **体验优化**：改进安装和启动过程的日志显示，分步骤展示进度
+- 🐛 **故障排除**：详细日志模式帮助用户快速定位安装或启动过程中的问题
+- ✅ 增加每个执行步骤的清晰标识和状态反馈
+- ✅ 支持一键切换详细/简洁日志模式 (菜单选项 v)
+
+### v1.0.2
+- 🔧 **重要修复**：修复Nexus CLI安装的交互提示问题，使用非交互模式自动确认
+- ✅ 添加经过验证的完整手动安装流程说明
+- ✅ 支持纯数字Node ID格式（如：6520503）
+- ✅ 改进文档，添加screen使用的多种方法
+- ✅ 增强安装过程的稳定性和可靠性
+
+### v1.0.1
+- 🔧 **重要修复**：修复Node ID格式问题，移除连字符以符合nexus要求
+- ✅ 添加Node ID格式验证和自动转换功能
+- ✅ 改进nexus启动流程，增加命令测试和详细日志
 - ✅ 修复Linux环境下系统资源检测失败的问题
 - ✅ 添加跨平台系统资源检测（Windows/Linux/macOS）
 - ✅ 增强日志查看功能，支持多种日志类型

@@ -8,6 +8,7 @@ class NexusMultiRunner {
         this.containers = [];
         this.nodeCount = 0;
         this.nodeId = '';
+        this.verboseMode = true; // 默认开启详细日志模式
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
@@ -294,105 +295,190 @@ class NexusMultiRunner {
     }
 
     // 在容器中执行命令
-    async execInContainer(containerName, command) {
+    async execInContainer(containerName, command, showOutput = false) {
         const execCommand = `docker exec ${containerName} bash -c "${command}"`;
-        return this.execCommand(execCommand);
+        
+        if (showOutput) {
+            console.log(`\n🔧 [${containerName}] 执行命令:`);
+            console.log(`   ${command}`);
+            console.log(`⏳ 等待执行结果...`);
+        }
+        
+        try {
+            const result = await this.execCommand(execCommand);
+            if (showOutput && result) {
+                console.log(`📤 输出结果:`);
+                // 对输出进行格式化，每行前面加上缩进
+                const formattedOutput = result.split('\n').map(line => `   ${line}`).join('\n');
+                console.log(formattedOutput);
+                console.log(`✅ 命令执行完成\n`);
+            } else if (showOutput) {
+                console.log(`✅ 命令执行完成（无输出）\n`);
+            }
+            return result;
+        } catch (error) {
+            if (showOutput) {
+                console.log(`❌ 命令执行失败:`);
+                console.log(`   错误信息: ${error.message}\n`);
+            }
+            throw error;
+        }
     }
 
     // 在容器中安装nexus
     async installNexusInContainer(containerName) {
-        console.log(`📦 在容器 ${containerName} 中安装nexus...`);
+        console.log(`\n📦 ====== 开始在容器 ${containerName} 中安装nexus ======`);
         
         try {
-            console.log('🔄 更新包管理器...');
-            await this.execInContainer(containerName, 'apt update');
+            console.log('\n🔄 步骤1: 更新包管理器...');
+            await this.execInContainer(containerName, 'apt update', this.verboseMode);
             
-            console.log('📦 安装基础系统工具...');
-            await this.execInContainer(containerName, 'apt install -y curl wget git build-essential libssl-dev');
+            console.log('\n📦 步骤2: 安装基础系统工具...');
+            await this.execInContainer(containerName, 'apt install -y curl wget git build-essential libssl-dev', this.verboseMode);
             
-            console.log('📺 安装screen...');
-            await this.execInContainer(containerName, 'apt install -y screen');
+            console.log('\n📺 步骤3: 安装screen...');
+            await this.execInContainer(containerName, 'apt install -y screen', this.verboseMode);
             
-            console.log('🔍 验证screen安装...');
+            console.log('\n🔍 步骤4: 验证screen安装...');
             try {
-                const screenVersion = await this.execInContainer(containerName, 'screen --version');
-                console.log('Screen版本:', screenVersion.trim());
+                const screenVersion = await this.execInContainer(containerName, 'screen --version', this.verboseMode);
+                console.log('✅ Screen版本:', screenVersion.trim());
             } catch (err) {
                 console.log('⚠️ 无法验证screen版本，但继续安装过程');
+                if (this.verboseMode) {
+                    console.log('   错误详情:', err.message);
+                }
             }
             
-            console.log('⬇️ 下载并安装nexus CLI...');
-            await this.execInContainer(containerName, 'curl -L https://cli.nexus.xyz | sh');
+            console.log('\n⬇️ 步骤5: 下载并安装nexus CLI...');
+            console.log('   这个步骤可能需要较长时间，请耐心等待...');
+            // 使用非交互模式安装，自动回答y
+            await this.execInContainer(containerName, 'echo "y" | curl -L https://cli.nexus.xyz | sh', this.verboseMode);
             
-            console.log('🔍 验证nexus CLI安装...');
+            console.log('\n🔍 步骤6: 验证nexus CLI安装...');
             try {
-                const nexusPath = await this.execInContainer(containerName, 'ls -la ~/.nexus/bin/ 2>/dev/null || echo "nexus未安装"');
-                console.log('Nexus CLI文件:', nexusPath.trim());
+                const nexusPath = await this.execInContainer(containerName, 'ls -la ~/.nexus/bin/ 2>/dev/null || echo "nexus未安装"', this.verboseMode);
+                console.log('✅ Nexus CLI文件列表:');
+                console.log('   ' + nexusPath.trim().replace(/\n/g, '\n   '));
             } catch (err) {
                 console.log('⚠️ 无法验证nexus CLI安装');
+                if (this.verboseMode) {
+                    console.log('   错误详情:', err.message);
+                }
             }
             
-            console.log(`✅ 容器 ${containerName} 中nexus安装成功`);
+            console.log(`\n✅ ====== 容器 ${containerName} 中nexus安装成功！ ======`);
             return true;
         } catch (error) {
-            console.error(`❌ 容器 ${containerName} 中nexus安装失败:`, error.message);
+            console.error(`\n❌ ====== 容器 ${containerName} 中nexus安装失败！ ======`);
+            console.error('错误详情:', error.message);
+            if (this.verboseMode) {
+                console.error('完整错误栈:', error.stack);
+            }
             return false;
         }
     }
 
     // 在容器中运行nexus
     async runNexusInContainer(containerName, nodeId) {
-        console.log(`🎯 在容器 ${containerName} 中运行nexus节点...`);
+        console.log(`\n🎯 ====== 在容器 ${containerName} 中启动nexus节点 ======`);
+        console.log(`🆔 使用Node ID: ${nodeId}`);
         
         try {
             // 1. 检查nexus是否已安装
-            console.log('🔍 检查nexus安装状态...');
+            console.log('\n🔍 步骤1: 检查nexus安装状态...');
             try {
-                const nexusVersion = await this.execInContainer(containerName, '~/.nexus/bin/nexus-network --version 2>/dev/null || echo "not installed"');
-                console.log('Nexus版本:', nexusVersion.trim());
+                const nexusVersion = await this.execInContainer(containerName, '~/.nexus/bin/nexus-network --version 2>/dev/null || echo "not installed"', this.verboseMode);
+                console.log('✅ Nexus版本:', nexusVersion.trim());
             } catch (err) {
                 console.log('⚠️ 无法检查nexus版本');
+                if (this.verboseMode) {
+                    console.log('   错误详情:', err.message);
+                }
             }
             
             // 2. 创建日志目录
-            console.log('📁 创建日志目录...');
-            await this.execInContainer(containerName, 'mkdir -p ~/.nexus/logs');
+            console.log('\n📁 步骤2: 创建日志目录...');
+            await this.execInContainer(containerName, 'mkdir -p ~/.nexus/logs', this.verboseMode);
             
-            // 3. 使用screen在后台运行nexus，并重定向输出到日志文件
-            console.log('🚀 启动nexus节点...');
-            const runCommand = `screen -dmS nexus-${nodeId} bash -c '~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 | tee ~/.nexus/logs/nexus-${nodeId}.log'`;
-            await this.execInContainer(containerName, runCommand);
+            // 3. 验证node-id格式
+            console.log('\n🔍 步骤3: 验证Node ID格式...');
+            if (!/^[a-zA-Z0-9]+$/.test(nodeId)) {
+                console.log(`❌ Node ID格式无效: ${nodeId}`);
+                console.log('💡 Node ID只能包含字母和数字，不能包含特殊字符');
+                return false;
+            }
+            console.log(`✅ Node ID格式有效: ${nodeId}`);
             
-            // 4. 等待一下，然后检查进程是否启动
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            console.log('🔍 检查nexus进程状态...');
+            // 4. 测试nexus命令
+            console.log('\n🧪 步骤4: 测试nexus命令...');
             try {
-                const processes = await this.execInContainer(containerName, 'ps aux | grep nexus | grep -v grep');
+                const testCommand = `timeout 5 ~/.nexus/bin/nexus-network start --node-id ${nodeId} --help 2>&1 || echo "nexus命令测试完成"`;
+                const testResult = await this.execInContainer(containerName, testCommand, this.verboseMode);
+                console.log('✅ 命令测试完成');
+                if (this.verboseMode) {
+                    console.log('测试结果预览:', testResult.substring(0, 200) + '...');
+                }
+            } catch (err) {
+                console.log('⚠️ 无法测试nexus命令，继续启动');
+                if (this.verboseMode) {
+                    console.log('   错误详情:', err.message);
+                }
+            }
+            
+            // 5. 使用screen在后台运行nexus，并重定向输出到日志文件
+            console.log('\n🚀 步骤5: 启动nexus节点...');
+            const logFile = `~/.nexus/logs/nexus-${nodeId}.log`;
+            const runCommand = `screen -dmS nexus-${nodeId} bash -c 'echo "启动nexus节点: ${nodeId}" > ${logFile}; ~/.nexus/bin/nexus-network start --node-id ${nodeId} 2>&1 | tee -a ${logFile}; echo "nexus进程退出，退出码: $?" >> ${logFile}'`;
+            await this.execInContainer(containerName, runCommand, this.verboseMode);
+            
+            // 6. 等待一下，然后检查进程是否启动
+            console.log('\n⏳ 步骤6: 等待进程启动...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            console.log('\n🔍 步骤7: 检查nexus进程状态...');
+            try {
+                const processes = await this.execInContainer(containerName, 'ps aux | grep nexus | grep -v grep', this.verboseMode);
                 if (processes.trim()) {
-                    console.log('✅ Nexus进程已启动:', processes.trim());
+                    console.log('✅ Nexus进程已启动');
+                    if (this.verboseMode) {
+                        console.log('进程详情:', processes.trim());
+                    }
                 } else {
-                    console.log('⚠️ 未找到nexus进程');
+                    console.log('⚠️ 未找到nexus进程，可能还在启动中');
                 }
             } catch (err) {
                 console.log('⚠️ 无法检查nexus进程');
+                if (this.verboseMode) {
+                    console.log('   错误详情:', err.message);
+                }
             }
             
-            // 5. 检查screen会话
+            // 8. 检查screen会话
+            console.log('\n📺 步骤8: 检查screen会话...');
             try {
-                const screenSessions = await this.execInContainer(containerName, 'screen -ls');
-                console.log('📺 Screen会话:', screenSessions.trim());
+                const screenSessions = await this.execInContainer(containerName, 'screen -ls', this.verboseMode);
+                console.log('✅ Screen会话状态:');
+                console.log('   ' + screenSessions.trim().replace(/\n/g, '\n   '));
             } catch (err) {
                 console.log('⚠️ 无法检查screen会话');
+                if (this.verboseMode) {
+                    console.log('   错误详情:', err.message);
+                }
             }
             
-            console.log(`✅ 容器 ${containerName} 中nexus节点启动命令已执行`);
+            console.log(`\n✅ ====== 容器 ${containerName} 中nexus节点启动完成！ ======`);
             console.log(`📄 日志文件位置: ~/.nexus/logs/nexus-${nodeId}.log`);
             console.log(`📺 Screen会话名称: nexus-${nodeId}`);
+            console.log('💡 使用菜单选项6可以查看详细日志');
             
             return true;
         } catch (error) {
-            console.error(`❌ 容器 ${containerName} 中nexus节点启动失败:`, error.message);
+            console.error(`\n❌ ====== 容器 ${containerName} 中nexus节点启动失败！ ======`);
+            console.error('错误详情:', error.message);
+            if (this.verboseMode) {
+                console.error('完整错误栈:', error.stack);
+            }
             return false;
         }
     }
@@ -441,7 +527,13 @@ class NexusMultiRunner {
             // 5. 查看nexus日志文件
             console.log('\n--- Nexus日志文件 ---');
             try {
-                const nexusLogs = await this.execInContainer(containerName, 'find ~/.nexus -name "*.log" -exec tail -10 {} \\; 2>/dev/null || echo "暂无nexus日志文件"');
+                // 首先列出所有日志文件
+                const logFiles = await this.execInContainer(containerName, 'find ~/.nexus/logs -name "*.log" 2>/dev/null || echo "无日志文件"');
+                console.log('日志文件列表:', logFiles.trim());
+                
+                // 读取最新的日志内容
+                const nexusLogs = await this.execInContainer(containerName, 'find ~/.nexus/logs -name "*.log" -exec echo "=== {} ===" \\; -exec tail -20 {} \\; 2>/dev/null || echo "暂无nexus日志文件"');
+                console.log('日志内容:');
                 console.log(nexusLogs || '暂无nexus日志');
             } catch (err) {
                 console.log('无法读取nexus日志:', err.message);
@@ -473,10 +565,11 @@ class NexusMultiRunner {
         console.log('7. 重启nexus节点');
         console.log('8. 清理冲突容器');
         console.log('9. 停止所有节点');
+        console.log(`v. 切换详细日志模式 (当前: ${this.verboseMode ? '开启' : '关闭'})`);
         console.log('0. 退出');
         console.log('====================');
         
-        const choice = await this.getUserInput('请选择操作 (0-9): ');
+        const choice = await this.getUserInput('请选择操作 (0-9, v): ');
         
         switch (choice) {
             case '1':
@@ -505,6 +598,16 @@ class NexusMultiRunner {
                 break;
             case '9':
                 await this.stopAllNodes();
+                break;
+            case 'v':
+            case 'V':
+                this.verboseMode = !this.verboseMode;
+                console.log(`✅ 详细日志模式已${this.verboseMode ? '开启' : '关闭'}`);
+                if (this.verboseMode) {
+                    console.log('💡 现在安装和运行过程将显示详细的执行日志');
+                } else {
+                    console.log('💡 现在安装和运行过程将只显示关键信息');
+                }
                 break;
             case '0':
                 this.rl.close();
@@ -544,9 +647,11 @@ class NexusMultiRunner {
         // 创建并部署节点
         for (let i = 0; i < this.nodeCount; i++) {
             const containerName = `nexus-node-${i + 1}`;
-            const nodeId = `${baseNodeId}-${i + 1}`;
+            // 修复node-id格式：移除连字符，使用数字格式
+            const nodeId = `${baseNodeId}${String(i + 1).padStart(2, '0')}`;
             
             console.log(`\n📦 部署节点 ${i + 1}/${this.nodeCount}...`);
+            console.log(`🔢 使用Node ID: ${nodeId}`);
             
             // 创建容器
             if (await this.createContainer(containerName, nodeId)) {
@@ -637,7 +742,17 @@ class NexusMultiRunner {
                     
                     // 重新启动nexus
                     console.log('🚀 重新启动nexus...');
-                    const nodeId = this.containers.find(c => c.name === name)?.nodeId || 'unknown';
+                    let nodeId = this.containers.find(c => c.name === name)?.nodeId || 'unknown';
+                    
+                    // 如果nodeId包含连字符，转换为新格式
+                    if (nodeId.includes('-')) {
+                        const parts = nodeId.split('-');
+                        if (parts.length === 2) {
+                            nodeId = parts[0] + String(parts[1]).padStart(2, '0');
+                            console.log(`🔄 转换Node ID格式: ${this.containers.find(c => c.name === name)?.nodeId} -> ${nodeId}`);
+                        }
+                    }
+                    
                     await this.runNexusInContainer(name, nodeId);
                     
                     console.log(`✅ 容器 ${name} 重启完成`);
