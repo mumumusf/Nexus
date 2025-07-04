@@ -138,9 +138,25 @@ class NexusNodeManager {
     }
 
     // 在容器中执行命令
-    async executeInContainer(command) {
+    async executeInContainer(command, timeout = 30000) {
         const fullCommand = `docker exec ${this.containerName} bash -c "${command}"`;
-        return await execAsync(fullCommand);
+        
+        return new Promise((resolve, reject) => {
+            // 设置超时
+            const timeoutId = setTimeout(() => {
+                reject(new Error(`命令执行超时 (${timeout/1000}秒): ${command}`));
+            }, timeout);
+            
+            execAsync(fullCommand)
+                .then(result => {
+                    clearTimeout(timeoutId);
+                    resolve(result);
+                })
+                .catch(error => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                });
+        });
     }
 
     // 安装Nexus CLI
@@ -187,32 +203,71 @@ class NexusNodeManager {
             if (this.detailedLogs) console.log(`📁 创建日志目录...`);
             await this.executeInContainer(`mkdir -p ~/.nexus/logs`);
             
-            // 在screen会话中启动节点，重定向日志到文件
-            if (this.detailedLogs) console.log(`🔧 启动nexus进程...`);
+            // 分步骤启动，避免复杂命令卡住
+            if (this.detailedLogs) console.log(`🔧 准备启动环境...`);
             const logFile = `~/.nexus/logs/node-${nodeId}.log`;
-            const command = `screen -dmS ${screenSessionName} bash -c "source ~/.bashrc && nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}"`;
             
-            await this.executeInContainer(command);
+            // 先创建启动脚本
+            const startScript = `/tmp/start_nexus_${nodeId}.sh`;
+            const scriptContent = `#!/bin/bash
+export PATH="$HOME/.local/bin:$PATH"
+cd $HOME
+nexus-network start --node-id ${nodeId} 2>&1 | tee ${logFile}`;
             
-            // 快速检查启动状态
-            if (this.detailedLogs) console.log(`⏳ 等待进程启动...`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (this.detailedLogs) console.log(`📝 创建启动脚本...`);
+            await this.executeInContainer(`echo '${scriptContent}' > ${startScript}`);
+            await this.executeInContainer(`chmod +x ${startScript}`);
             
-            // 简化的状态检查
-            console.log(`✅ 节点 ${nodeId} 启动命令已执行`);
+            // 使用更简单的screen命令
+            if (this.detailedLogs) console.log(`🚀 启动screen会话...`);
+            const command = `screen -dmS ${screenSessionName} ${startScript}`;
+            
+            if (this.detailedLogs) console.log(`执行命令: ${command}`);
+            
+            // 使用较短超时执行screen命令（5秒）
+            try {
+                await this.executeInContainer(command, 5000);
+                if (this.detailedLogs) console.log(`✅ Screen命令执行完成`);
+            } catch (error) {
+                if (error.message.includes('超时')) {
+                    console.log(`⚠️ Screen命令可能超时，但节点可能已启动`);
+                } else {
+                    throw error;
+                }
+            }
+            
+            // 快速验证screen会话
+            if (this.detailedLogs) console.log(`🔍 验证screen会话...`);
+            try {
+                const { stdout } = await this.executeInContainer(`screen -ls`, 3000);
+                if (stdout.includes(screenSessionName)) {
+                    console.log(`✅ 节点 ${nodeId} 启动成功，Screen会话已创建`);
+                    if (this.detailedLogs) {
+                        console.log(`📊 启动信息:`);
+                        console.log(`   - Screen会话: ${screenSessionName}`);
+                        console.log(`   - 日志文件: ${logFile}`);
+                        console.log(`   - 启动脚本: ${startScript}`);
+                    }
+                } else {
+                    console.log(`⚠️ 节点 ${nodeId} 启动命令已执行，但Screen会话未确认`);
+                }
+            } catch (verifyError) {
+                console.log(`⚠️ 节点 ${nodeId} 启动命令已执行（验证超时，但可能正常运行）`);
+            }
+            
             if (this.detailedLogs) {
-                console.log(`📊 启动信息:`);
-                console.log(`   - Screen会话: ${screenSessionName}`);
-                console.log(`   - 日志文件: ${logFile}`);
+                console.log(`💡 手动检查命令:`);
                 console.log(`   - 查看实时日志: docker exec -it ${this.containerName} bash -c "tail -f ${logFile}"`);
                 console.log(`   - 查看screen会话: docker exec -it ${this.containerName} bash -c "screen -ls"`);
+                console.log(`   - 连接screen: docker exec -it ${this.containerName} bash -c "screen -r ${screenSessionName}"`);
             }
             
             this.nodeInstances.push({
                 nodeId: nodeId,
                 screenSession: screenSessionName,
                 status: 'running',
-                logFile: logFile
+                logFile: logFile,
+                startScript: startScript
             });
             
             return true;
